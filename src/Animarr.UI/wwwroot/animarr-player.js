@@ -2926,6 +2926,10 @@
         quality:            'Quality',
         quality_original:   'Original',
         unit_mbps:          'Mbps',
+        info_buffer:        'Buffer: {0} s ahead, {1} s back',
+        buffer_mobile:      'phone',
+        buffer_metered:     'metered connection',
+        buffer_saver:       'Data Saver',
         picture:            'Picture',
         picture_mode:       'Scaling',
         picture_force:      'Force aspect (stretch)',
@@ -3079,6 +3083,29 @@
             + (uhd.length ? ' · 4K: ' + uhd.join(',') : '')
             + ' · ' + caps.channels + 'ch'
             + (caps.source === 'mediaCapabilities' ? '' : ' · (canPlayType)');
+    }
+
+    // ── hls.js buffer profile (task 4.5, B23) ────────────────────────
+    // hls.js buffers forward up to maxBufferLength seconds, and keeps going
+    // while the buffer holds less than maxBufferSize bytes — up to
+    // maxMaxBufferLength. The old 90 s / 600 s / 120 MB let a stream-copy
+    // plan (segments ready as fast as the disk reads them) pull most of an
+    // episode at once. Now a minute ahead on a desktop / TV, half that on a
+    // phone, less again when the browser says the connection is metered,
+    // slow or in Data Saver (navigator.connection: saveData, type
+    // 'cellular', effectiveType 2g/3g).
+    function bufferProfile() {
+        const c = navigator.connection || null;
+        const isTv = document.documentElement.classList.contains('animarr-tv-host');
+        const mobile = !isTv && ((navigator.userAgentData && navigator.userAgentData.mobile)
+            || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || ''));
+        if (c && c.saveData)
+            return { kind: 'saver', ahead: 20, aheadMax: 30, bytes: 20e6, back: 10 };
+        if (c && (c.type === 'cellular' || /^(slow-2g|2g|3g)$/.test(c.effectiveType || '')))
+            return { kind: 'metered', ahead: 20, aheadMax: 40, bytes: 25e6, back: 10 };
+        if (mobile)
+            return { kind: 'mobile', ahead: 30, aheadMax: 60, bytes: 40e6, back: 20 };
+        return { kind: 'default', ahead: 60, aheadMax: 120, bytes: 80e6, back: 30 };
     }
 
     // Fallback ladder (task 1.7): Direct Play → Direct Stream → HLS copy →
@@ -3788,6 +3815,9 @@
                 initialSubIdx = restore.sub.idx;
             }   // else: was Off, or an external track (restoredExtSub, below)
             const initialSub = initialSubIdx >= 0 ? subtitleList[initialSubIdx] : null;
+            // hls.js buffer sizes (bufferProfile) — known up front so Info
+            // can show them from the first paint.
+            entry.bufferProfile = isHls ? bufferProfile() : null;
             art = new window.Artplayer({
             container: el,
             url: playUrl,
@@ -3800,13 +3830,12 @@
                         video.src = url;
                         return;
                     }
-                    // Buffer sizing. Segments stream from the loopback media proxy
-                    // (http://127.0.0.1) over a normal socket — NOT the old base64
-                    // JS↔.NET bridge — so the GC-storm-from-over-buffering problem
-                    // is gone, and we keep a generous forward buffer to ride out
-                    // transient segment-delivery / on-the-fly transcode hiccups.
-                    // backBufferLength stays modest so long episodes don't pin
-                    // unbounded memory.
+                    // Buffer sizing (task 4.5, B23): see bufferProfile — a
+                    // forward buffer that rides out segment-delivery /
+                    // on-the-fly transcode hiccups without, on a stream-copy
+                    // plan (segments ready as fast as the disk reads), pulling
+                    // ten minutes ahead over a phone's mobile data.
+                    const buf = entry.bufferProfile || bufferProfile();
                     const hls = new window.Hls({
                         fragLoadingTimeOut:     60000,
                         fragLoadingMaxRetry:    8,
@@ -3816,18 +3845,30 @@
                         maxFragLookUpTolerance: 2,
                         nudgeOffset:            0.5,
                         nudgeMaxRetry:          10,
-                        // Generous forward buffer to absorb transient stalls.
-                        maxBufferLength:        90,
-                        maxMaxBufferLength:     600,
-                        maxBufferSize:          120 * 1000 * 1000,
-                        // Keep ~60s of already-played media so small back-seeks
-                        // are instant, without holding the whole episode.
-                        backBufferLength:       60,
+                        maxBufferLength:        buf.ahead,
+                        maxMaxBufferLength:     buf.aheadMax,
+                        maxBufferSize:          buf.bytes,
+                        // Already-played media kept for instant small back-seeks.
+                        backBufferLength:       buf.back,
                     });
                     hls.loadSource(url);
                     hls.attachMedia(video);
                     art.hls = hls;
-                    art.on('destroy', () => { try { hls.destroy(); } catch {} });
+                    // The network can change under a running stream (Wi-Fi →
+                    // mobile data, Data Saver toggled): hls.js reads these per
+                    // fragment, so just retune them.
+                    const conn = navigator.connection;
+                    const onConn = () => {
+                        const b = bufferProfile();
+                        entry.bufferProfile = b;
+                        Object.assign(hls.config, { maxBufferLength: b.ahead, maxMaxBufferLength: b.aheadMax,
+                                                    maxBufferSize: b.bytes, backBufferLength: b.back });
+                    };
+                    try { conn && conn.addEventListener && conn.addEventListener('change', onConn); } catch {}
+                    art.on('destroy', () => {
+                        try { conn && conn.removeEventListener && conn.removeEventListener('change', onConn); } catch {}
+                        try { hls.destroy(); } catch {}
+                    });
                     // Autostart reliability: Artplayer's `autoplay` fires play()
                     // ONCE at construction — but on the HLS path the manifest +
                     // first segment may still be warming up on the server then, so
@@ -4272,6 +4313,12 @@
                 lines.push(t('quality') + ': ' + qualityChoiceText(entry));
                 lines.push('Playback: ' + planName(o.plan));
                 if (o.transcoded && o.transcodeReason) lines.push('Reason: ' + o.transcodeReason);
+            }
+            // hls.js forward / back buffer (only HLS has one we size).
+            const bp = entry.bufferProfile;
+            if (bp && isHls) {
+                lines.push(tf('info_buffer', bp.ahead, bp.back)
+                    + (bp.kind !== 'default' ? ' (' + t('buffer_' + bp.kind) + ')' : ''));
             }
             // Quality button: the quality in force as a badge, amber when the
             // video is re-encoded; the tooltip names the plan and reason.
