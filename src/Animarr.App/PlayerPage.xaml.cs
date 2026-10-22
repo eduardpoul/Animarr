@@ -12,18 +12,23 @@ namespace Animarr.App;
 
 /// <summary>
 /// Full-screen native player. ExoPlayer (via NativePlayerService) renders into a
-/// TextureView added to the root grid; the XAML HUD sits on top. Two control
+/// SurfaceView added to the root grid; the XAML HUD sits on top. Two control
 /// modes, like a web/YouTube-TV player:
 ///
-///   • HUD hidden (video playing): the remote drives playback directly —
-///     OK = play/pause, ◀/▶ = seek ±10s. ▲/▼ reveals the HUD.
+///   • HUD hidden (video playing): ◀/▶ seek ∓/±10 s (the target shows on
+///     screen; held presses are coalesced), any other key reveals the HUD.
+///     With the Up Next card on screen, OK starts the next episode and Back
+///     hides the card.
 ///   • HUD shown: focus lands on the on-screen buttons; arrows move focus
 ///     between them and OK activates the focused one (normal D-pad nav). The
 ///     HUD auto-hides after a few seconds of no input while playing.
+///   • Media keys (play/pause, ⏩/⏪, ⏭/⏮, stop) act directly in either mode,
+///     and a MediaSession takes the same commands from the system (remotes
+///     routed to the session, Google Assistant).
 ///
 /// Keys are delivered from MainActivity.OnKeyDown via <see cref="HandleKey"/>,
-/// which only intercepts them while the HUD is hidden; once it's up, keys fall
-/// through to MAUI focus navigation.
+/// which only intercepts media keys and keys while the HUD is hidden; once
+/// it's up, keys fall through to MAUI focus navigation.
 /// </summary>
 public partial class PlayerPage : ContentPage
 {
@@ -42,6 +47,11 @@ public partial class PlayerPage : ContentPage
     private int?   _episode;
     private string _filePath;
     private readonly long   _resumeMs;
+    private readonly string _title;
+    /// <summary>The file the CURRENT stream plays. Differs from _filePath while
+    /// an episode switch waits for its start: the old stream's position and
+    /// end must not be saved against (or advance from) the new episode.</summary>
+    private string? _streamFilePath;
 
     // Playback timeline. All three tiers expose ExoPlayer positions on the file's
     // absolute runtime — Direct Play natively, the Direct Stream remux via absolute
@@ -94,6 +104,7 @@ public partial class PlayerPage : ContentPage
         _episode = episode;
         _filePath = filePath;
         _resumeMs = resumeMs;
+        _title = title ?? "";
 
         TitleLabel.Text = (title ?? "").ToUpperInvariant();
         EyebrowLabel.Text = episode is not null
@@ -114,6 +125,9 @@ public partial class PlayerPage : ContentPage
         AspectFocus.Command    = new Command(OpenAspectSheet);
         InfoFocus.Command      = new Command(ShowInfo);
         VolumeSliderFocus.Command = new Command(CloseSheet);
+        UpNextPlayFocus.Command = new Command(TriggerUpNext);
+        UpNextSkipFocus.Command = new Command(SkipCredits);
+        UpNextHideFocus.Command = new Command(DismissUpNext);
 
         // Re-apply the remembered aspect mode ("default" = fit/letterbox) —
         // the raw TextureView stretches non-16:9 sources without it.
@@ -137,14 +151,20 @@ public partial class PlayerPage : ContentPage
         RevealHud();  // show the HUD + focus the play button on entry
     }
 
-    // ── Remote control (simple) ─────────────────────────────────────────────
-    // HUD hidden → any key opens it and focus lands on the buttons.
+    // ── Remote control ──────────────────────────────────────────────────────
+    // Media keys → act directly, whatever is on screen.
+    // HUD hidden → ◀/▶ seek, OK on the lone Up Next card plays the next
+    // episode, any other key opens the HUD and focus lands on the buttons.
     // HUD shown → keys fall through to normal MAUI focus navigation (arrows move
     // between buttons, OK activates). Back hides the HUD (handled via OnBack).
     public bool HandleKey(int keyCode)
     {
 #if ANDROID
         var kc = (Android.Views.Keycode)keyCode;
+
+        // Transport keys never move focus: handled in every state, a sheet
+        // included (play/pause over the audio list is still play/pause).
+        if (HandleMediaKey(kc)) return true;
 
         // A submenu is open → it owns the keys. The volume slider has no
         // focusable rows, so ◀/▶ are captured here (a native key-listener on the
@@ -189,12 +209,54 @@ public partial class PlayerPage : ContentPage
 
         if (!Hud.IsVisible)
         {
+            switch (kc)
+            {
+                // ◀ / ▶ seek straight away (they used to only open the HUD);
+                // a held key repeats and the repeats are coalesced.
+                case Android.Views.Keycode.DpadLeft:  SeekBy(-10_000, feedback: true); return true;
+                case Android.Views.Keycode.DpadRight: SeekBy(+10_000, feedback: true); return true;
+                case Android.Views.Keycode.DpadCenter or Android.Views.Keycode.Enter
+                    or Android.Views.Keycode.NumpadEnter when UpNextCard.IsVisible:
+                    TriggerUpNext();
+                    return true;
+            }
             RevealHud();
             return true;    // swallow the key that opened the menu
         }
         ArmAutoHide();      // keep it up while the user navigates
 #endif
         return false;       // focus navigation drives the buttons
+    }
+
+#if ANDROID
+    private bool HandleMediaKey(Android.Views.Keycode kc)
+    {
+        switch (kc)
+        {
+            case Android.Views.Keycode.MediaPlayPause:
+            case Android.Views.Keycode.Headsethook:      TogglePlay();                     return true;
+            case Android.Views.Keycode.MediaPlay:        SetPlaying(true);                 return true;
+            case Android.Views.Keycode.MediaPause:       SetPlaying(false);                return true;
+            case Android.Views.Keycode.MediaStop:        Leave();                          return true;
+            case Android.Views.Keycode.MediaFastForward:
+            case Android.Views.Keycode.MediaSkipForward:
+            case Android.Views.Keycode.MediaStepForward: SeekBy(+10_000, feedback: true);  return true;
+            case Android.Views.Keycode.MediaRewind:
+            case Android.Views.Keycode.MediaSkipBackward:
+            case Android.Views.Keycode.MediaStepBackward: SeekBy(-10_000, feedback: true); return true;
+            case Android.Views.Keycode.MediaNext:        GoAdjacentEpisode(+1);            return true;
+            case Android.Views.Keycode.MediaPrevious:    GoAdjacentEpisode(-1);            return true;
+        }
+        return false;
+    }
+#endif
+
+    /// <summary>Leave the player (media Stop / the system's stop command).</summary>
+    private void Leave()
+    {
+        if (_leaving) return;
+        _leaving = true;
+        _ = Navigation.PopAsync();
     }
 
     public static bool HandleGlobalBack() => Current?.OnBack() ?? false;
@@ -213,13 +275,18 @@ public partial class PlayerPage : ContentPage
     {
         if (_sheetMode != SheetMode.None) { CloseSheet(); return true; }
         if (Hud.IsVisible) { HideHud(); return true; }
+        if (UpNextCard.IsVisible) { DismissUpNext(); return true; }
         return false;       // let navigation pop the page
     }
 
     private void RevealHud()
     {
         Hud.IsVisible = true;
-        try { PlayPauseButton.Focus(); } catch { }
+        // With Up Next armed the HUD brings its card along; focus goes to
+        // "Смотреть", so OK means the same thing as on the lone card.
+        UpdateUpNextVisibility();
+        if (UpNextCard.IsVisible) FocusRow(UpNextPlayButton);
+        else try { PlayPauseButton.Focus(); } catch { }
         ArmAutoHide();
         // Bridge the wide gap between the transport cluster and the settings
         // cluster with explicit focus links — D-pad focus search won't reliably
@@ -281,15 +348,48 @@ public partial class PlayerPage : ContentPage
         _hudTimer.Start();
     }
 
-    private void HideHud() => Hud.IsVisible = false;
+    private void HideHud()
+    {
+        Hud.IsVisible = false;
+        UpdateUpNextVisibility();
+    }
 
     private void AttachAndStart()
     {
         if (_started) return;
         _started = true;
         AttachSurface();
+        StartMediaSession();
         _ = StartAsync();
+        _ = ResolveAdjacentAsync();
         StartTimer();
+    }
+
+#if ANDROID
+    private Services.TvMediaSession? _session;
+#endif
+    /// <summary>Playback speed (1 = normal), reported to the MediaSession.</summary>
+    private float _speed = 1f;
+
+    /// <summary>System-side control (session-routed media keys, Google
+    /// Assistant): the same commands as the remote, through the same paths.</summary>
+    private void StartMediaSession()
+    {
+#if ANDROID
+        try
+        {
+            var ctx = Platform.CurrentActivity ?? Platform.AppContext;
+            _session = new Services.TvMediaSession(ctx, new Services.TvMediaSession.Commands(
+                Play: () => SetPlaying(true),
+                Pause: () => SetPlaying(false),
+                SeekTo: SeekToAbs,
+                SeekBy: d => SeekBy(d, feedback: true),
+                Next: () => GoAdjacentEpisode(+1),
+                Previous: () => GoAdjacentEpisode(-1),
+                Stop: Leave));
+        }
+        catch (Exception ex) { Log($"media session: {ex.Message}"); }
+#endif
     }
 
     private void AttachSurface()
@@ -597,6 +697,7 @@ public partial class PlayerPage : ContentPage
         }
 
         // Success — only now does the new stream replace the old one.
+        _streamFilePath = _filePath;
         _maxHeight = maxHeight;
         _kind = directPlay ? StreamKind.DirectPlay : directStream ? StreamKind.DirectStream : StreamKind.Hls;
         Log($"start #{gen}: {_kind} plan={b.Output?.Plan}");
@@ -1245,27 +1346,59 @@ public partial class PlayerPage : ContentPage
                              .OrderBy(f => f.Season ?? 0).ThenBy(f => f.Episode ?? 0)
                              .ToList();
         }
-        catch { _episodes = new List<MediaFileDto>(); }
+        // Not cached: a failed fetch used to read as "no other episodes" for
+        // the rest of the session.
+        catch (Exception ex) { Log($"episode list: {ex.Message}"); return new List<MediaFileDto>(); }
         return _episodes;
+    }
+
+    /// <summary>The episode <paramref name="delta"/> steps from the current
+    /// one; null at either end (or for a film).</summary>
+    private async Task<MediaFileDto?> AdjacentAsync(int delta)
+    {
+        var eps = await GetEpisodesAsync();
+        int i = eps.FindIndex(f => string.Equals(f.FilePath, _filePath, StringComparison.OrdinalIgnoreCase));
+        if (i < 0) i = eps.FindIndex(f => f.Season == _season && f.Episode == _episode);
+        int j = i + delta;
+        return i < 0 || j < 0 || j >= eps.Count ? null : eps[j];
     }
 
     private async void GoAdjacentEpisode(int delta)
     {
         var eps = await GetEpisodesAsync();
         if (eps.Count <= 1) { FlashInfo("Других серий нет"); return; }
-        int i = eps.FindIndex(f => string.Equals(f.FilePath, _filePath, StringComparison.OrdinalIgnoreCase));
-        if (i < 0) i = eps.FindIndex(f => f.Season == _season && f.Episode == _episode);
-        int j = i + delta;
-        if (i < 0 || j < 0 || j >= eps.Count)
+        if (await AdjacentAsync(delta) is not { } f)
         {
             FlashInfo(delta > 0 ? "Это последняя серия" : "Это первая серия");
             return;
         }
-        SwitchToEpisode(eps[j]);
+        SwitchToEpisode(f);
     }
 
-    private void SwitchToEpisode(MediaFileDto f)
+    private int _switchGen;
+
+    /// <summary>Where <paramref name="f"/> was left off: an unwatched episode's
+    /// saved position (like the detail page), else the start. Asked fresh —
+    /// another device may have moved it. A slow / failed answer starts at 0.</summary>
+    private async Task<long> SavedPositionAsync(MediaFileDto f)
     {
+        try
+        {
+            var ask = _api.GetWatchStatesAsync(_mediaItemId);
+            if (await Task.WhenAny(ask, Task.Delay(3000)) != ask) return 0;
+            var states = await ask;
+            var ws = states.FirstOrDefault(w => string.Equals(w.FilePath, f.FilePath, StringComparison.OrdinalIgnoreCase))
+                     ?? states.FirstOrDefault(w => (w.Season ?? 1) == (f.Season ?? 1) && w.Episode == f.Episode);
+            return ws is { IsWatched: false, ProgressMs: > 0 } ? ws.ProgressMs!.Value : 0;
+        }
+        catch (Exception ex) { Log($"watch states: {ex.Message}"); return 0; }
+    }
+
+    private async void SwitchToEpisode(MediaFileDto f)
+    {
+        // The episode being left: its last seconds count too (90 % = watched).
+        if (_streamFilePath == _filePath && NativePlayerService.Instance?.GetState() is { } st)
+            RecordProgress(_streamBaseMs + st.PositionMs, _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs);
         _season = f.Season;
         _episode = f.Episode;
         _filePath = f.FilePath;
@@ -1274,6 +1407,7 @@ public partial class PlayerPage : ContentPage
         _maxHeight = 0; _sourceHeight = 0; _streamBaseMs = 0; _knownDurationMs = 0;
         _isDirectStream = false; _forceTranscode = false; _capFallback = false;   // per-file decisions
         _recoveringSinceUtc = null;
+        _pendingSeekMs = null; _seekTimer?.Stop();   // a seek pressed on the old episode
         // Tracks are per file: carry the subtitle choice by language (or off).
         if (_sub is { } sub) _subCarry = (sub.IsOff, sub.IsOff ? null : TrackLabels.NormLang(SubLang(sub)));
         _sub = null;
@@ -1284,11 +1418,137 @@ public partial class PlayerPage : ContentPage
         _audio = null;
         _introStart = _introEnd = _creditsStart = _creditsEnd = null;
         _skipVisible = false; SkipButton.IsVisible = false;
+        ResetUpNext();
         EyebrowLabel.Text = _episode is not null
             ? $"NOW PLAYING · S{_season ?? 1} · EP {_episode}"
             : "NOW PLAYING";
         FlashInfo(_episode is not null ? $"Серия {_episode}" : "Воспроизведение");
-        _ = StartStreamAsync(0, 0, playWhenReady: true);
+        _ = ResolveAdjacentAsync();
+        // ⏭ / ⏮ / Up Next continue an episode where it was left (it always
+        // started at 0:00).
+        int sw = ++_switchGen;
+        long resume = await SavedPositionAsync(f);
+        if (sw != _switchGen || _closed) return;
+        if (resume > 0) Log($"episode switch: resume at {resume} ms");
+        _ = StartStreamAsync(resume, 0, playWhenReady: true);
+    }
+
+    // ── Up Next ─────────────────────────────────────────────────────────────
+    // Like the web player: the next episode is offered from the detected
+    // credits start (else 95 % of the runtime). The card announces itself on
+    // its own for 5 s, then shows with the HUD; in the last 10 s it counts
+    // down on screen and the next episode starts at the end. "Скрыть" / Back
+    // cancels that for this episode. Its "Пропустить титры" only shows when
+    // something follows the credits (a preview) — otherwise "Смотреть" is the
+    // skip.
+
+    private const double UpNextFallbackFraction = 0.95;
+    private const double UpNextCountdownSec = 10;
+    private static readonly TimeSpan UpNextAnnounce = TimeSpan.FromSeconds(5);
+
+    private MediaFileDto? _nextEpisode, _prevEpisode;
+    private bool _upNextArmed, _upNextDismissed, _upNextDone, _creditsSkipUsed;
+    private DateTime _upNextArmedUtc;
+    private double _upNextRemainingSec = double.MaxValue;
+
+    private async Task ResolveAdjacentAsync()
+    {
+        var file = _filePath;
+        var next = await AdjacentAsync(+1);
+        var prev = await AdjacentAsync(-1);
+        if (file != _filePath) return;
+        _nextEpisode = next;
+        _prevEpisode = prev;
+        UpNextName.Text = next is null ? ""
+            : next.Episode is { } n ? (next.Season is { } s && s != _season ? $"Сезон {s} · Серия {n}" : $"Серия {n}")
+            : System.IO.Path.GetFileNameWithoutExtension(FileName(next.FilePath));
+    }
+
+    private void ResetUpNext()
+    {
+        _nextEpisode = _prevEpisode = null;
+        _upNextArmed = _upNextDismissed = _upNextDone = _creditsSkipUsed = false;
+        _upNextRemainingSec = double.MaxValue;
+        UpNextCard.IsVisible = false;
+    }
+
+    private double UpNextTriggerSec(double durSec) =>
+        _creditsStart is double cs && cs > 0 && cs < durSec ? cs : durSec * UpNextFallbackFraction;
+
+    /// <summary>Per tick: arm / count down / advance (only while playing — a
+    /// pause in the last seconds holds the countdown, like the web player
+    /// whose countdown runs on timeupdate).</summary>
+    private void UpdateUpNext(double posSec, double durSec, bool playing)
+    {
+        bool armed = !_upNextDone && !_upNextDismissed && _nextEpisode is not null
+                     && durSec > 0 && posSec >= UpNextTriggerSec(durSec);
+        if (armed && !_upNextArmed)
+        {
+            _upNextArmedUtc = DateTime.UtcNow;
+            Log($"up next armed at {posSec:0}s: {UpNextName.Text}");
+        }
+        _upNextArmed = armed;
+        _upNextRemainingSec = armed ? durSec - posSec : double.MaxValue;
+        if (armed)
+        {
+            UpNextPlayLabel.Text = _upNextRemainingSec <= UpNextCountdownSec
+                ? $"▶  Смотреть · {Math.Max(0, (int)Math.Ceiling(_upNextRemainingSec))}"
+                : "▶  Смотреть";
+            UpNextSkipButton.IsVisible = !_creditsSkipUsed && _creditsEnd is double ce
+                                         && durSec - ce > 5 && posSec < ce;
+        }
+        UpdateUpNextVisibility();
+        if (armed && playing && _upNextRemainingSec <= 0.4) TriggerUpNext();
+    }
+
+    private void UpdateUpNextVisibility()
+    {
+        bool show = _upNextArmed && _sheetMode == SheetMode.None
+                    && (Hud.IsVisible || DateTime.UtcNow - _upNextArmedUtc < UpNextAnnounce
+                        || _upNextRemainingSec <= UpNextCountdownSec);
+        if (show == UpNextCard.IsVisible) return;
+        bool hadFocus = IsFocused(UpNextPlayButton) || IsFocused(UpNextSkipButton) || IsFocused(UpNextHideButton);
+        UpNextCard.IsVisible = show;
+        // Appearing over the HUD: focus "Смотреть" (OK = next episode, like the
+        // lone card). Disappearing with focus inside: back to play / pause.
+        if (show && Hud.IsVisible) Dispatcher.Dispatch(() => FocusRow(UpNextPlayButton));
+        else if (!show && hadFocus && Hud.IsVisible) Dispatcher.Dispatch(() => FocusRow(PlayPauseButton));
+    }
+
+    private void TriggerUpNext()
+    {
+        if (_upNextDone || _nextEpisode is not { } next) return;
+        _upNextDone = true;
+        _upNextArmed = false;
+        UpdateUpNextVisibility();
+        Log($"up next → S{next.Season}E{next.Episode}");
+        SwitchToEpisode(next);
+    }
+
+    private void DismissUpNext()
+    {
+        _upNextDismissed = true;
+        _upNextArmed = false;
+        UpdateUpNextVisibility();
+        Log("up next dismissed");
+    }
+
+    private void SkipCredits()
+    {
+        if (_creditsEnd is not double ce) return;
+        _creditsSkipUsed = true;
+        UpNextSkipButton.IsVisible = false;
+        FocusRow(UpNextPlayButton);
+        SeekToAbs((long)(ce * 1000));
+    }
+
+    private static bool IsFocused(View v)
+    {
+#if ANDROID
+        return v.Handler?.PlatformView is Android.Views.View nv && nv.IsFocused;
+#else
+        return false;
+#endif
     }
 
     private string? Abs(string? url)
@@ -1370,7 +1630,10 @@ public partial class PlayerPage : ContentPage
             _ = KeepAliveAsync(tok);
         }
 
-        PlayPauseIcon.Text  = st.Playing ? "❚❚" : "▶";
+        // The intent (PlayWhenReady), not Playing: that is false while
+        // buffering, so the icon offered "play" and OK "resumed" instead of
+        // pausing.
+        PlayPauseIcon.Text  = st.PlayWhenReady ? "❚❚" : "▶";
         BufferSpinner.IsVisible = st.Buffering;
 
         if (dur > 0 && _pendingSeekMs is null)
@@ -1380,13 +1643,33 @@ public partial class PlayerPage : ContentPage
             DurationLabel.Text = Fmt(dur);
         }
 
+#if ANDROID
+        _session?.SetMetadata(_title, _episode is not null ? $"Сезон {_season ?? 1} · Серия {_episode}" : null, dur);
+        _session?.SetState(st.PlayWhenReady, st.Buffering, st.Ended, _pendingSeekMs ?? absPos, _speed,
+                           _nextEpisode is not null, _prevEpisode is not null);
+#endif
+
+        // An episode switch is waiting for its stream: the old one's position
+        // and end belong to the episode that was left.
+        if (_streamFilePath != _filePath) return;
+
+        UpdateUpNext(absPos / 1000.0, dur / 1000.0, st.PlayWhenReady);
+        // It may have switched episodes (and resolved the one after) — the
+        // old stream's end below must not advance a second time.
+        if (_streamFilePath != _filePath) return;
         UpdateSkip(absPos / 1000.0);
         UpdateSkipFocusLink();
 
         if (st.Ended)
         {
             RecordProgress(absPos, dur);
-            _ = Navigation.PopAsync();
+            // The next episode follows unless Up Next was dismissed (or the
+            // user paused right at the end).
+            if (_nextEpisode is not null && !_upNextDismissed && !_upNextDone)
+            {
+                if (st.PlayWhenReady) TriggerUpNext();
+            }
+            else if (!_upNextDone) Leave();
             return;
         }
 
@@ -1403,7 +1686,11 @@ public partial class PlayerPage : ContentPage
             SkipButton.IsVisible = true;
             return;
         }
-        if (_creditsStart is double cs && posSec >= cs)
+        // Credits: only inside the detected segment (it used to come back after
+        // creditsEnd for the rest of the file), and not while the Up Next card
+        // owns the credits — it has its own skip.
+        if (_creditsStart is double cs && posSec >= cs && !_upNextArmed
+            && (_creditsEnd is not double ce || posSec < ce))
         {
             _skipTarget = _creditsEnd ?? (_durationMs / 1000.0);
             _skipVisible = true;
@@ -1417,26 +1704,40 @@ public partial class PlayerPage : ContentPage
 
     private void DoSkip()
     {
-        if (_skipTarget > 0 && _isDirectStream)
-        {
-            // Same as SeekBy: the remux pipe is unseekable (SeekTo snaps to 0, so
-            // "Skip intro" replayed the chunk) — re-request it at the target.
-            _ = StartStreamAsync((long)(_skipTarget * 1000), _maxHeight);
-        }
-        else if (_skipTarget > 0)
-        {
-            long rel = (long)(_skipTarget * 1000) - _streamBaseMs;
-            if (rel < 0) rel = 0;
-            NativePlayerService.Instance?.SeekAsync(rel);
-        }
+        if (_skipTarget > 0) SeekToAbs((long)(_skipTarget * 1000));
         _skipVisible = false;
         SkipButton.IsVisible = false;
     }
 
+    /// <summary>Seek to an absolute time on the file's timeline (skip buttons,
+    /// the system's seek command).</summary>
+    private void SeekToAbs(long ms)
+    {
+        ms = Math.Max(0, ms);
+        _pendingSeekMs = null;
+        _seekTimer?.Stop();
+        // The remux pipe is unseekable (SeekTo snaps to 0, so "Skip intro"
+        // replayed the chunk) — re-request it at the target.
+        if (_isDirectStream) { _ = StartStreamAsync(ms, _maxHeight); return; }
+        NativePlayerService.Instance?.SeekAsync(Math.Max(0, ms - _streamBaseMs));
+    }
+
     private void TogglePlay()
+    {
+        // By the intent (PlayWhenReady): Playing is false while buffering, so
+        // a pause pressed during buffering used to "resume" instead.
+        var st = NativePlayerService.Instance?.GetState();
+        SetPlaying(_retryStart is not null || st is not { PlayWhenReady: true });
+    }
+
+    /// <summary>Play / pause (HUD button, media keys, the system). Play after a
+    /// failed start retries it. A pause from a media key or the system with
+    /// the HUD hidden shows the HUD, so it's clear where playback stopped.</summary>
+    private void SetPlaying(bool play)
     {
         if (_retryStart is { } retry)
         {
+            if (!play) return;
             ClearError();
             // The failed player reports its old error until the new stream is
             // prepared — don't let Tick read it as a failure of the retry.
@@ -1445,10 +1746,10 @@ public partial class PlayerPage : ContentPage
             _ = StartStreamAsync(retry.ResumeMs, retry.MaxHeight, playWhenReady: true);
             return;
         }
-        var st = NativePlayerService.Instance?.GetState();
-        if (st is null) return;
-        if (st.Playing) NativePlayerService.Instance?.PauseAsync();
-        else            NativePlayerService.Instance?.ResumeAsync();
+        if (NativePlayerService.Instance is not { } nps) return;
+        if (play) nps.ResumeAsync(); else nps.PauseAsync();
+        PlayPauseIcon.Text = play ? "❚❚" : "▶";
+        if (!play && !Hud.IsVisible && _sheetMode == SheetMode.None) RevealHud();
     }
 
     // ── Submenu sheets: volume slider + audio / subtitles / quality lists ────
@@ -1802,25 +2103,35 @@ public partial class PlayerPage : ContentPage
     {
         if (_pendingSeekMs is not long t) return;
         _pendingSeekMs = null;
-        _ = StartStreamAsync(t, _maxHeight);
+        if (_isDirectStream) _ = StartStreamAsync(t, _maxHeight);
+        else NativePlayerService.Instance?.SeekAsync(Math.Max(0, t - _streamBaseMs));
     }
 
-    private void SeekBy(long deltaMs)
+    /// <summary>Relative seek (±10 s buttons, ◀/▶ with the HUD hidden, ⏩/⏪,
+    /// the system). <paramref name="feedback"/> shows the target on screen —
+    /// for the presses made with the HUD (and its scrubber) out of sight.</summary>
+    private void SeekBy(long deltaMs, bool feedback = false)
     {
         var st = NativePlayerService.Instance?.GetState();
         if (st is null) return;
         long dur = _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs;
         long absPos = _streamBaseMs + st.PositionMs;
-        long target = Math.Clamp(absPos + deltaMs, 0, dur > 0 ? dur : long.MaxValue);
+        // Held / repeated presses on a server stream are coalesced into one
+        // seek (below), so they accumulate onto the pending target.
+        bool coalesce = _isDirectStream || _kind == StreamKind.Hls;
+        long target = Math.Clamp((coalesce ? _pendingSeekMs ?? absPos : absPos) + deltaMs, 0,
+                                 dur > 0 ? dur : long.MaxValue);
+        if (feedback)
+            FlashInfo($"{(deltaMs < 0 ? "◀◀" : "▶▶")}  {Fmt(target)}{(dur > 0 ? " / " + Fmt(dur) : "")}");
         // The /api/video remux pipe is NOT seekable — ExoPlayer.SeekTo snaps it
         // to 0 (the tester's "+10 resets to start"). Re-request the stream at
-        // the target instead; PTS stay absolute via -output_ts_offset.
-        if (_isDirectStream)
+        // the target instead; PTS stay absolute via -output_ts_offset. On HLS
+        // a seek past the produced segments restarts the server's ffmpeg there.
+        if (coalesce)
         {
-            // Every restart of the remux pipe costs the server ffprobe + ffmpeg:
-            // accumulate held / repeated presses and restart once, 450 ms after
-            // the last one; show the target meanwhile.
-            target = Math.Clamp((_pendingSeekMs ?? absPos) + deltaMs, 0, dur > 0 ? dur : long.MaxValue);
+            // Every restart costs the server ffprobe + ffmpeg: accumulate held /
+            // repeated presses and seek once, 450 ms after the last one; show
+            // the target meanwhile.
             _pendingSeekMs = target;
             PositionLabel.Text = Fmt(target);
             if (dur > 0) Scrubber.Progress = Math.Clamp((double)target / dur, 0, 1);
@@ -1864,8 +2175,13 @@ public partial class PlayerPage : ContentPage
         if (NativePlayerService.Instance is { } nps) nps.TracksChanged -= OnPlayerTracksChanged;
         _timer?.Stop();
         _hudTimer?.Stop();
+        _seekTimer?.Stop();
+#if ANDROID
+        _session?.Dispose();
+        _session = null;
+#endif
         var st = NativePlayerService.Instance?.GetState();
-        if (st is not null)
+        if (st is not null && _streamFilePath == _filePath)
             RecordProgress(_streamBaseMs + st.PositionMs,
                            _knownDurationMs > 0 ? _knownDurationMs : st.DurationMs);
         _ = NativePlayerService.Instance?.DetachAsync();

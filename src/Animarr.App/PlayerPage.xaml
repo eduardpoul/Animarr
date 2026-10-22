@@ -46,12 +46,6 @@
                                Color="#bb5000" WidthRequest="64" HeightRequest="64"
                                HorizontalOptions="Center" VerticalOptions="Center" />
 
-            <!-- transient info line (kodек / audio / subs / quality feedback) -->
-            <Label x:Name="InfoLine" IsVisible="False" Text="" TextColor="White"
-                   FontFamily="sans-serif" FontSize="13" HorizontalOptions="Center"
-                   VerticalOptions="End" Margin="0,0,0,200" BackgroundColor="#B3000000"
-                   Padding="16,8" />
-
             <!-- bottom: progress + time + controls -->
             <Grid VerticalOptions="End" HeightRequest="180">
                 <BoxView>
@@ -157,6 +151,50 @@
                 </VerticalStackLayout>
             </Grid>
         </Grid>
+
+        <!-- transient info line (codec / audio / subs / quality feedback, seek
+             target): outside the HUD, so it also shows while the HUD is hidden
+             (a seek with ◀/▶, a fallback rung, a media key). -->
+        <Label x:Name="InfoLine" IsVisible="False" Text="" TextColor="White"
+               FontFamily="sans-serif" FontSize="13" HorizontalOptions="Center"
+               VerticalOptions="End" Margin="0,0,0,200" BackgroundColor="#B3000000"
+               Padding="16,8" />
+
+        <!-- Up Next: the next episode near the credits (detected start, else
+             95 %), a countdown in the last 10 s, then the next episode starts.
+             Shown with the HUD, and on its own while it announces itself and
+             during the countdown. -->
+        <Border x:Name="UpNextCard" IsVisible="False" HorizontalOptions="End" VerticalOptions="End"
+                Margin="0,0,40,200" Padding="22,16" WidthRequest="440" StrokeThickness="0"
+                StrokeShape="RoundRectangle 14" BackgroundColor="#F2202020">
+            <VerticalStackLayout Spacing="10">
+                <Label Text="ДАЛЕЕ" TextColor="#f49157" FontFamily="sans-serif" FontSize="10" CharacterSpacing="2" />
+                <Label x:Name="UpNextName" Text="" TextColor="White" FontFamily="sans-serif-medium"
+                       FontAttributes="Bold" FontSize="17" MaxLines="1" LineBreakMode="TailTruncation" />
+                <HorizontalStackLayout Spacing="8">
+                    <Border x:Name="UpNextPlayButton" HeightRequest="36" Padding="14,0" StrokeThickness="0"
+                            StrokeShape="RoundRectangle 8" BackgroundColor="#E6bb5000">
+                        <Border.Behaviors><local:TvFocusBehavior x:Name="UpNextPlayFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
+                        <Label x:Name="UpNextPlayLabel" Text="▶  Смотреть" TextColor="White" FontFamily="sans-serif"
+                               FontSize="13" HorizontalOptions="Center" VerticalOptions="Center" />
+                    </Border>
+                    <Border x:Name="UpNextSkipButton" IsVisible="False" HeightRequest="36" Padding="14,0" StrokeThickness="0"
+                            StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
+                        <Border.Behaviors><local:TvFocusBehavior x:Name="UpNextSkipFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
+                        <Label Text="Пропустить титры" TextColor="White" FontFamily="sans-serif"
+                               FontSize="13" HorizontalOptions="Center" VerticalOptions="Center" />
+                    </Border>
+                    <Border x:Name="UpNextHideButton" HeightRequest="36" Padding="14,0" StrokeThickness="0"
+                            StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
+                        <Border.Behaviors><local:TvFocusBehavior x:Name="UpNextHideFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
+                        <Label Text="Скрыть" TextColor="#d6d6d6" FontFamily="sans-serif"
+                               FontSize="13" HorizontalOptions="Center" VerticalOptions="Center" />
+                    </Border>
+                </HorizontalStackLayout>
+                <Label x:Name="UpNextHint" Text="OK — смотреть · Назад — скрыть" TextColor="#9a9a9a"
+                       FontFamily="sans-serif" FontSize="11" />
+            </VerticalStackLayout>
+        </Border>
 
         <!-- submenu overlay: volume slider / audio-subs-quality selection.
              Sits above the HUD; keys are captured in code-behind (_sheetMode). -->
