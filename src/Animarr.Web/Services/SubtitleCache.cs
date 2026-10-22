@@ -32,7 +32,11 @@ public static class SubtitleCache
     private const long MaxCacheBytes = 256L * 1024 * 1024;
     private const long TrimToBytes   = 192L * 1024 * 1024;
     private const int  SweepEveryWrites = 32;
+    /// <summary>A sweep also follows this many new bytes — one PGS track can
+    /// weigh as much as hundreds of text tracks.</summary>
+    private const long SweepEveryBytes  = 64L * 1024 * 1024;
     private static int _writesSinceSweep;
+    private static long _bytesSinceSweep;
     private static int _sweeping;
 
     /// <summary><paramref name="Path"/> = the cached track; null = conversion
@@ -173,12 +177,7 @@ public static class SubtitleCache
 
             if (r.Path is null) return Remember(cached, r with { FailureCode = ConvertFailed });
             File.Move(tmp, cached, overwrite: true);
-
-            if (Interlocked.Increment(ref _writesSinceSweep) >= SweepEveryWrites)
-            {
-                Interlocked.Exchange(ref _writesSinceSweep, 0);
-                _ = Task.Run(() => Sweep(dir));
-            }
+            NoteWrite(dir, cached);
             return r with { Path = cached };
         }
         finally
@@ -226,6 +225,7 @@ public static class SubtitleCache
             ], tmp, ct);
             if (r.Path is null) return Remember(cached, r with { FailureCode = ConvertFailed });
             File.Move(tmp, cached, overwrite: true);
+            NoteWrite(dir, cached);
             return r with { Path = cached };
         }
         finally { TryDelete(tmp); }
@@ -473,6 +473,21 @@ public static class SubtitleCache
                 File.SetLastWriteTimeUtc(path, now);
         }
         catch { /* best-effort */ }
+    }
+
+    /// <summary>A new file in the cache (a text conversion or a <c>.sup</c>):
+    /// a sweep every <see cref="SweepEveryWrites"/> files or
+    /// <see cref="SweepEveryBytes"/> bytes, whichever comes first.</summary>
+    private static void NoteWrite(string dir, string file)
+    {
+        long length = 0;
+        try { length = new FileInfo(file).Length; } catch { }
+        bool byCount = Interlocked.Increment(ref _writesSinceSweep) >= SweepEveryWrites;
+        bool byBytes = Interlocked.Add(ref _bytesSinceSweep, length) >= SweepEveryBytes;
+        if (!byCount && !byBytes) return;
+        Interlocked.Exchange(ref _writesSinceSweep, 0);
+        Interlocked.Exchange(ref _bytesSinceSweep, 0);
+        _ = Task.Run(() => Sweep(dir));
     }
 
     /// <summary>Keep the cache under <see cref="MaxCacheBytes"/> (trim the oldest

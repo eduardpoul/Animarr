@@ -15,11 +15,21 @@ namespace Animarr.Web.Services;
 /// (<c>ffmpeg -dump_attachment</c>: attachments sit in the container header,
 /// no full read) together with a manifest of each font's family / full /
 /// PostScript name read from its OpenType <c>name</c> table — the names
-/// libass asks for. The fonts directory is size-capped, oldest first.
+/// libass asks for. The fonts directory is size-capped, oldest first; one
+/// attachment over <see cref="MaxFontBytes"/> isn't a font anyone ships (and
+/// would sit in the cache whole), so it is skipped, as is everything past
+/// <see cref="MaxSetBytes"/> for one file.
 /// </summary>
 public sealed class SubtitleFontService
 {
     private const long MaxCacheBytes = 512L * 1024 * 1024;
+    /// <summary>Largest attachment taken as a font (big CJK fonts are ~20–30 MB).</summary>
+    internal const long MaxFontBytes = 50L * 1024 * 1024;
+    /// <summary>Most font bytes kept for one file — the set being extracted is
+    /// exempt from the cache sweep, so it needs its own cap.</summary>
+    internal const long MaxSetBytes  = 256L * 1024 * 1024;
+    /// <summary>Most bytes read from a font to find its names (the name table).</summary>
+    private const int MaxNameTableBytes = 1024 * 1024;
     private static readonly TimeSpan DumpTimeout = TimeSpan.FromSeconds(60);
 
     private readonly MediaProbeCache _probeCache;
@@ -106,6 +116,12 @@ public sealed class SubtitleFontService
             var codec = s.TryGetProperty("codec_name", out var cn) ? cn.GetString() : null;
             if (!IsFont(fileName, mime, codec)) continue;
             long? size = s.TryGetProperty("extradata_size", out var es) && es.TryGetInt64(out var n) && n > 0 ? n : null;
+            if (size > MaxFontBytes)
+            {
+                _logger.LogInformation("Skipping attachment {Index} of {Path}: {Bytes} bytes is too big for a font",
+                    index, fullPath, size);
+                continue;
+            }
             list.Add(new Font(index, fileName ?? $"font{index}", mime, size, null, null, null));
         }
         return list;
@@ -144,7 +160,8 @@ public sealed class SubtitleFontService
         {
             var fi = new FileInfo(fullPath);
             if (!fi.Exists) return null;
-            var key = $"{fullPath}|{fi.LastWriteTimeUtc.Ticks}|{fi.Length}|fonts1";
+            // fonts2: sets extracted before the size caps are redone.
+            var key = $"{fullPath}|{fi.LastWriteTimeUtc.Ticks}|{fi.Length}|fonts2";
             return Path.Combine(_root, Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(Encoding.UTF8.GetBytes(key))));
         }
         catch { return null; }
@@ -180,7 +197,16 @@ public sealed class SubtitleFontService
                 CreateNoWindow         = true,
             };
             foreach (var a in new[] { "-hide_banner", "-loglevel", "error", "-y" }) psi.ArgumentList.Add(a);
+            // What the probe sized stops at the set cap; the sizes it didn't
+            // report are checked after the dump.
+            long planned = 0;
+            var wanted = new List<Font>(attachments.Count);
             foreach (var f in attachments)
+            {
+                if (f.SizeBytes is long known && (planned += known) > MaxSetBytes) break;
+                wanted.Add(f);
+            }
+            foreach (var f in wanted)
             {
                 psi.ArgumentList.Add($"-dump_attachment:{f.Id.ToString(CultureInfo.InvariantCulture)}");
                 psi.ArgumentList.Add(Path.Combine(work, FontFileName(f)));
@@ -202,15 +228,24 @@ public sealed class SubtitleFontService
                     _logger.LogDebug("ffmpeg -dump_attachment exit {Code} for {Path}: {Err}", p.ExitCode, fullPath, err.Trim());
             }
 
-            var fonts = new List<Font>(attachments.Count);
-            foreach (var f in attachments)
+            var fonts = new List<Font>(wanted.Count);
+            long kept = 0;
+            foreach (var f in wanted)
             {
                 var file = Path.Combine(work, FontFileName(f));
-                if (!File.Exists(file) || new FileInfo(file).Length == 0) continue;
-                var names = ReadNames(await File.ReadAllBytesAsync(file));
+                long length = File.Exists(file) ? new FileInfo(file).Length : 0;
+                if (length == 0) continue;
+                if (length > MaxFontBytes || kept + length > MaxSetBytes)
+                {
+                    _logger.LogInformation("Dropping attachment {Id} of {Path}: {Bytes} bytes (font / set cap)", f.Id, fullPath, length);
+                    try { File.Delete(file); } catch { }
+                    continue;
+                }
+                kept += length;
+                var names = ReadNames(file);
                 fonts.Add(f with
                 {
-                    SizeBytes = new FileInfo(file).Length,
+                    SizeBytes = length,
                     Family = names.Family, FullName = names.FullName, PostScriptName = names.PostScript,
                 });
             }
@@ -274,30 +309,62 @@ public sealed class SubtitleFontService
 
     // ─── OpenType name table ──────────────────────────────────────────────────
 
-    /// <summary>Family / full / PostScript name of a TrueType / OpenType font
-    /// (the first font of a collection). Nulls for WOFF or anything unreadable.</summary>
-    internal static (string? Family, string? FullName, string? PostScript) ReadNames(ReadOnlySpan<byte> data)
+    /// <summary>Family / full / PostScript name of the TrueType / OpenType font
+    /// in <paramref name="file"/> (the first font of a collection), reading only
+    /// the table directory and the <c>name</c> table — never the whole font.
+    /// Nulls for WOFF or anything unreadable.</summary>
+    internal static (string? Family, string? FullName, string? PostScript) ReadNames(string file)
     {
         try
         {
-            int sfnt = 0;
-            if (data.Length >= 16 && data[..4].SequenceEqual("ttcf"u8))
-                sfnt = checked((int)BinaryPrimitives.ReadUInt32BigEndian(data[12..]));
-            if (data.Length < sfnt + 12) return default;
-            int numTables = BinaryPrimitives.ReadUInt16BigEndian(data[(sfnt + 4)..]);
-            int nameOffset = -1;
+            using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.RandomAccess);
+            var head = new byte[16];
+            if (ReadAt(fs, 0, head) < 12) return default;
+            long sfnt = head.AsSpan(0, 4).SequenceEqual("ttcf"u8) ? BinaryPrimitives.ReadUInt32BigEndian(head.AsSpan(12)) : 0;
+            var offsets = new byte[12];
+            if (ReadAt(fs, sfnt, offsets) < 12) return default;
+            int numTables = BinaryPrimitives.ReadUInt16BigEndian(offsets.AsSpan(4));
+            var records = new byte[numTables * 16];
+            if (ReadAt(fs, sfnt + 12, records) < records.Length) return default;
             for (int i = 0; i < numTables; i++)
             {
-                int rec = sfnt + 12 + i * 16;
-                if (data.Length < rec + 16) return default;
-                if (data.Slice(rec, 4).SequenceEqual("name"u8))
-                {
-                    nameOffset = checked((int)BinaryPrimitives.ReadUInt32BigEndian(data[(rec + 8)..]));
-                    break;
-                }
+                var rec = records.AsSpan(i * 16, 16);
+                if (!rec[..4].SequenceEqual("name"u8)) continue;
+                long offset = BinaryPrimitives.ReadUInt32BigEndian(rec[8..]);
+                long length = BinaryPrimitives.ReadUInt32BigEndian(rec[12..]);
+                if (length < 6 || length > MaxNameTableBytes) return default;
+                var table = new byte[length];
+                return ReadAt(fs, offset, table) == table.Length ? ReadNameTable(table) : default;
             }
-            if (nameOffset < 0 || data.Length < nameOffset + 6) return default;
-            var table = data[nameOffset..];
+            return default;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return default;
+        }
+    }
+
+    /// <summary>Fills <paramref name="buffer"/> from <paramref name="offset"/>;
+    /// the bytes read (fewer at the end of the file).</summary>
+    private static int ReadAt(FileStream fs, long offset, byte[] buffer)
+    {
+        if (offset < 0 || offset >= fs.Length) return 0;
+        fs.Position = offset;
+        int total = 0;
+        while (total < buffer.Length)
+        {
+            int n = fs.Read(buffer, total, buffer.Length - total);
+            if (n == 0) break;
+            total += n;
+        }
+        return total;
+    }
+
+    /// <summary>The wanted names out of an OpenType <c>name</c> table.</summary>
+    private static (string? Family, string? FullName, string? PostScript) ReadNameTable(ReadOnlySpan<byte> table)
+    {
+        try
+        {
             int count = BinaryPrimitives.ReadUInt16BigEndian(table[2..]);
             int strings = BinaryPrimitives.ReadUInt16BigEndian(table[4..]);
 
