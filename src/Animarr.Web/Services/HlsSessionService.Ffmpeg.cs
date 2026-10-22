@@ -36,11 +36,14 @@ public sealed partial class HlsSessionService
         int maxBitrate = 0,
         // HDR → SDR tone mapping for the re-encode plans (None = SDR source or
         // off). Chosen once per session by ToneMapperFor.
-        HdrToneMapper toneMapper = HdrToneMapper.None)
+        HdrToneMapper toneMapper = HdrToneMapper.None,
+        // What to do with the mapped audio (AudioPolicy; chosen once per
+        // session). null = the historical AAC stereo transcode.
+        AudioDecision? audio = null)
     {
         var args = new List<string>();
+        var audioArgs = (audio ?? new AudioDecision(false, "aac", 2, "192k")).Args().ToArray();
         var videoCodec = probe?.VideoCodec;
-        var audioCodec = probe?.AudioCodec;
         // NVDEC and VAAPI have no H.264 High10 decoder: hand Hi10P to the GPU
         // re-encoders as a non-hw-decodable input so it takes their software-
         // decode + upload path (as legacy codecs do) instead of failing in
@@ -67,24 +70,24 @@ public sealed partial class HlsSessionService
         switch (plan)
         {
             case HlsPlan.TsStreamCopy:
-                BuildTsStreamCopyArgs(args, fullPath, seekSec, audioCodec, startNumber, audioTrackIndex,
+                BuildTsStreamCopyArgs(args, fullPath, seekSec, audioArgs, startNumber, audioTrackIndex,
                     externalAudioPath, audioOffsetSec, videoMap);
                 break;
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs);
                 break;
             case HlsPlan.Fmp4NvencReencode:
                 BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs);
                 break;
             case HlsPlan.Fmp4StreamCopy:
                 BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
-                    externalAudioPath, videoMap);
+                    externalAudioPath, videoMap, audioArgs);
                 break;
             case HlsPlan.Fmp4SoftwareReencode:
                 BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
-                    targetHeight, audioTrackIndex, externalAudioPath, rate, toneMapper, videoMap);
+                    targetHeight, audioTrackIndex, externalAudioPath, rate, toneMapper, videoMap, audioArgs);
                 break;
         }
 
@@ -156,6 +159,9 @@ public sealed partial class HlsSessionService
     /// </summary>
     private static readonly string ForceKeyFramesExpr =
         $"expr:gte(t,n_forced*{SegmentDurationSec.ToString("F1", CultureInfo.InvariantCulture)})";
+
+    /// <summary>The historical audio leg: AAC stereo 192k.</summary>
+    private static readonly string[] DefaultAudioArgs = ["-c:a", "aac", "-ac", "2", "-b:a", "192k"];
 
     /// <summary>
     /// An output path in the form ffmpeg's HLS muxer can split. hlsenc finds
@@ -284,7 +290,7 @@ public sealed partial class HlsSessionService
     /// absolute clock-time the player can chase. Audio gets AAC re-encoded
     /// when the source codec isn't browser-friendly (DTS, TrueHD, etc.).</summary>
     private static void BuildTsStreamCopyArgs(List<string> args, string fullPath, double seekSec,
-        string? audioCodec, int startNumber, int audioTrackIndex,
+        string[] audioArgs, int startNumber, int audioTrackIndex,
         string? externalAudioPath = null, double audioOffsetSec = 0.0, string videoMap = "0:V:0?")
     {
         bool ext = externalAudioPath is not null;
@@ -331,20 +337,11 @@ public sealed partial class HlsSessionService
             "-map", ext ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?",
             "-c:v", "copy",
         });
-        // Audio: an external dub is always AAC-transcoded — its codec is
-        // unknown here (.mka can hold FLAC/AC3/DTS/…) so we can't risk a copy.
-        // For the source's own audio, passthrough when the browser can decode
-        // it inside MPEG-TS (AAC/MP3 only across all browsers; AC3/E-AC3 work
-        // in Chrome but break Firefox/Safari, so those re-encode to AAC).
-        // audioCodec is the mapped track's (ProbeInfo.ForAudioTrack).
-        if (TsAudioPassthrough(audioCodec, ext))
-        {
-            args.AddRange(new[] { "-c:a", "copy" });
-        }
-        else
-        {
-            args.AddRange(new[] { "-c:a", "aac", "-ac", "2", "-b:a", "192k" });
-        }
+        // Audio as AudioPolicy decided for the mapped track: copied when the
+        // client decodes it and the TS demuxer it uses takes it (hls.js: AAC /
+        // MP3; a native player also AC-3 / E-AC-3 / DTS), else transcoded. An
+        // external dub is always transcoded.
+        args.AddRange(audioArgs);
     }
 
     /// <summary>fMP4 HLS with VAAPI re-encode to H.264 + B-frames disabled.
@@ -353,7 +350,7 @@ public sealed partial class HlsSessionService
     private static void BuildFmp4VaapiArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
-        HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?")
+        HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null)
     {
         // Re-encoding the video stream eliminates the B-frame display reorder
         // that puts the first reorderable frame ~83ms past the segment
@@ -462,8 +459,8 @@ public sealed partial class HlsSessionService
             "-maxrate",rate.Max,
             "-bufsize",rate.Buf,
             "-force_key_frames", ForceKeyFramesExpr,
-            "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
+        args.AddRange(audioArgs ?? DefaultAudioArgs);
         if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
     }
 
@@ -476,7 +473,7 @@ public sealed partial class HlsSessionService
     private static void BuildFmp4NvencArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
-        HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?")
+        HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null)
     {
         // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
         // keeps frames on the GPU between decode and encode, avoiding a
@@ -551,8 +548,8 @@ public sealed partial class HlsSessionService
             "-maxrate",rate.Max,
             "-bufsize",rate.Buf,
             "-force_key_frames", ForceKeyFramesExpr,
-            "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
+        args.AddRange(audioArgs ?? DefaultAudioArgs);
         if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
     }
 
@@ -568,7 +565,7 @@ public sealed partial class HlsSessionService
     private static void BuildFmp4SoftwareArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, HdrToneMapper toneMapper = HdrToneMapper.None,
-        string videoMap = "0:V:0?")
+        string videoMap = "0:V:0?", string[]? audioArgs = null)
     {
         // Input #0 — video (software decode).
         if (seekSec > 0)
@@ -611,8 +608,8 @@ public sealed partial class HlsSessionService
             "-maxrate",rate.Max,
             "-bufsize",rate.Buf,
             "-force_key_frames", ForceKeyFramesExpr,
-            "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
+        args.AddRange(audioArgs ?? DefaultAudioArgs);
         if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
     }
 
@@ -625,7 +622,7 @@ public sealed partial class HlsSessionService
     /// has to rely on DLNA cast / mpv to avoid the wobble.</summary>
     private static void BuildFmp4StreamCopyArgs(List<string> args, string fullPath, double seekSec,
         int startNumber, string? videoCodec, double audioOffsetSec, int audioTrackIndex,
-        string? externalAudioPath = null, string videoMap = "0:V:0?")
+        string? externalAudioPath = null, string videoMap = "0:V:0?", string[]? audioArgs = null)
     {
         // A second input is needed either to shift the source's own audio
         // (-itsoffset) OR to pull audio from an external dub file. The external
@@ -664,8 +661,8 @@ public sealed partial class HlsSessionService
             "-map", videoMap,     // the probed main video, never a cover picture
             "-map", useDualInput ? $"1:a:{audioTrackIndex}?" : $"0:a:{audioTrackIndex}?",
             "-c:v", "copy",
-            "-c:a", "aac", "-ac", "2", "-b:a", "192k",
         });
+        args.AddRange(audioArgs ?? DefaultAudioArgs);
         if (string.Equals(videoCodec, "hevc", StringComparison.OrdinalIgnoreCase))
         {
             args.Add("-tag:v"); args.Add("hvc1");

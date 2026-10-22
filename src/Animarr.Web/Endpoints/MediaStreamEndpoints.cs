@@ -75,7 +75,15 @@ internal static class MediaStreamEndpoints
             MediaPathValidator pathValidator,
             MediaProbeCache probeCache,
             HttpContext http,
-            ILoggerFactory loggerFactory) =>
+            ILoggerFactory loggerFactory,
+            // The audio track to remux (0 = first) — /api/hls/start's Direct
+            // Stream URL carries it, so switching tracks keeps this cheap path.
+            int? audioTrackIndex,
+            // The client's caps (same names as /api/hls/start; ClientCaps): the
+            // audio is copied when the client decodes it, else transcoded.
+            // Absent = browser defaults (AAC / MP3 copied, the rest → AAC 2.0).
+            string? nativeCaps,
+            int? maxAudioChannels) =>
     {
         var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryFileAsync(path);
         if (!ok) return earlyResult!;
@@ -135,6 +143,22 @@ internal static class MediaStreamEndpoints
         var (videoCodec, hasDolbyVision, videoMap) = await PeekVideoCodecAsync(probeCache, fullPath!, http.RequestAborted);
         if (http.RequestAborted.IsCancellationRequested) return Results.Empty;   // seeked away mid-probe
 
+        // Audio: the requested track, copied when the client decodes it and MP4
+        // carries it (AAC / MP3 for a browser without caps), else transcoded —
+        // 5.1 for a 5.1 client, else a stereo downmix that keeps centre + LFE
+        // (AudioPolicy). It used to be track 0 only, always AAC 2.0 — even an
+        // AAC source was re-encoded, and a track switch had to leave this path
+        // for an HLS session (B19).
+        var trackIndex = audioTrackIndex ?? 0;
+        var track = await PeekAudioTrackAsync(probeCache, fullPath!, trackIndex, http.RequestAborted);
+        if (http.RequestAborted.IsCancellationRequested) return Results.Empty;
+        if (trackIndex < 0 || (track.Count is int n && trackIndex > 0 && trackIndex >= n))
+            return Results.Problem(detail: $"audioTrackIndex {trackIndex} is out of range ({track.Count} audio tracks).",
+                statusCode: StatusCodes.Status400BadRequest, title: "Invalid playback request",
+                extensions: new Dictionary<string, object?> { ["code"] = "invalid_audio_track" });
+        var audio = AudioPolicy.Decide(track.Codec, track.Channels, track.Profile,
+            ClientCaps.Parse(nativeCaps, maxAudioChannels), AudioOutput.Mp4Remux);
+
         args.AddRange(new[] { "-hide_banner", "-loglevel", "warning" });
         // AVI carries no pts for B-frames (XviD/DivX): stream-copied into fMP4
         // they came out as "pts has no value" packets at ≈ -7e14 s — a stream no
@@ -156,18 +180,12 @@ internal static class MediaStreamEndpoints
         args.AddRange(new[]
         {
             "-map", videoMap,            // the main video (never a cover picture in front of it)
-            "-map", "0:a:0?",            // first audio stream only — multi-audio
-                                         // selection in fMP4 isn't browser-friendly
+            // ONE audio stream — the selected one; a <video> element plays
+            // whichever track comes first, so the remux carries just that.
+            "-map", $"0:a:{trackIndex.ToString(System.Globalization.CultureInfo.InvariantCulture)}?",
             "-c:v", "copy",              // video stream-copy
-            // Audio: transcode to AAC. Source can be AC3 / EAC3 / DTS / TrueHD —
-            // none of those play reliably in Chrome/Edge. AAC is the lowest common
-            // denominator that every browser decodes. 192 kbps stereo is plenty
-            // for downmixed surround → headphones / laptop speakers; if the user
-            // ever wants 5.1 pass-through we'll add a query toggle.
-            "-c:a", "aac",
-            "-ac", "2",
-            "-b:a", "192k",
         });
+        args.AddRange(audio.Args());
         if (string.Equals(videoCodec, "hevc", StringComparison.OrdinalIgnoreCase))
         {
             // Critical for Chrome/Edge: refuse the default `hev1` fourcc in fMP4.
@@ -522,6 +540,34 @@ internal static class MediaStreamEndpoints
         {
             return (null, false, DefaultVideoMap);
         }
+    }
+
+    /// <summary>Codec / channels / profile of the <paramref name="index"/>-th
+    /// audio stream (= ffmpeg's <c>0:a:N</c>) and the audio stream count, from
+    /// the cached probe JSON. Unknown fields come back null / 0.</summary>
+    private static async Task<(string? Codec, int Channels, string? Profile, int? Count)> PeekAudioTrackAsync(
+        MediaProbeCache probeCache, string fullPath, int index, CancellationToken ct)
+    {
+        try
+        {
+            var json = await probeCache.GetStreamsJsonAsync(fullPath, ct);
+            if (json is null) return (null, 0, null, null);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("streams", out var streams)) return (null, 0, null, null);
+            int n = 0;
+            (string?, int, string?) hit = (null, 0, null);
+            foreach (var s in streams.EnumerateArray())
+            {
+                if (!s.TryGetProperty("codec_type", out var type) || type.GetString() != "audio") continue;
+                if (n++ != index) continue;
+                hit = (s.TryGetProperty("codec_name", out var cn) ? cn.GetString() : null,
+                       s.TryGetProperty("channels", out var ch) && ch.TryGetInt32(out var c) ? c : 0,
+                       s.TryGetProperty("profile", out var pr) ? pr.GetString() : null);
+            }
+            return (hit.Item1, hit.Item2, hit.Item3, n);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return (null, 0, null, null); }
+        catch { return (null, 0, null, null); }
     }
 
     /// <summary>Video mapping without a probe: the first video stream that

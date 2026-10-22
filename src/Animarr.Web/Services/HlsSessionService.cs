@@ -272,15 +272,20 @@ public sealed partial class HlsSessionService : IDisposable
     /// else (MKV containers, HEVC video, AC3/DTS/TrueHD audio) goes through
     /// our HLS pipeline where the appropriate <see cref="HlsPlan"/> is picked.
     /// </summary>
-    public async Task<PlaybackDecision> ChoosePlaybackAsync(string fullPath,
-        bool clientHevc = false, bool clientHevc10 = false, CancellationToken ct = default,
-        IReadOnlySet<string>? nativeCaps = null,
+    public async Task<PlaybackDecision> ChoosePlaybackAsync(string fullPath, ClientCaps client,
+        CancellationToken ct = default,
         // The Quality / Bitrate menu's caps (0 = none). One that really shrinks
         // the stream — a height below the source's, a bitrate below the
         // source's — needs the HLS re-encode, so neither native path applies.
         // One at/above the source (a "1080p" pick on a 1080p file, "≤ 20 Mbps"
         // on a 6 Mbps one) changes nothing and keeps the native path.
-        int maxHeight = 0, int maxBitrate = 0)
+        int maxHeight = 0, int maxBitrate = 0,
+        // The audio track to play (0 = first). Direct Play serves the file as
+        // it is — the player picks its own default track — so another track
+        // rules it out; the Direct Stream remux maps exactly the one asked for
+        // (/api/video ?audioTrackIndex=), so a track switch keeps the cheap
+        // remux instead of falling to an HLS session (B19).
+        int audioTrackIndex = 0)
     {
         var probe = await ProbeMediaAsync(fullPath, ct);
         var duration = probe?.DurationSec ?? 0;
@@ -288,6 +293,12 @@ public sealed partial class HlsSessionService : IDisposable
         if ((maxHeight > 0 && probe.Height > 0 && maxHeight < probe.Height)
             || EffectiveBitrateCap(maxBitrate, probe) > 0)
             return new PlaybackDecision(false, null, duration, null);
+        // An index past the last track: no native path — StartAsync answers it
+        // with the 400 invalid_audio_track.
+        if (audioTrackIndex < 0 || (audioTrackIndex > 0 && audioTrackIndex >= probe.AudioStreams.Count))
+            return new PlaybackDecision(false, null, duration, null);
+        // Audio fields of the track the remux would map.
+        var track = probe.ForAudioTrack(audioTrackIndex, null, false);
 
         var container = Path.GetExtension(fullPath).ToLowerInvariant().TrimStart('.');
 
@@ -299,32 +310,34 @@ public sealed partial class HlsSessionService : IDisposable
         // take instead of burning CPU on a transcode a browser would need.
         // Old AVI/XviD rips are the poster child: full re-encode for the web,
         // plain /api/file for the TV.
-        if (nativeCaps is { Count: > 0 })
+        // Since task 1.2 the web player reports the same tokens (MediaCapabilities),
+        // so this branch serves browsers that sent them too.
+        if (client.HasTokens)
         {
-            bool videoOk = NativeVideoOk(probe, nativeCaps);
-            bool audioOk = NativeTokenOk(probe.AudioCodec, nativeCaps);
-            bool containerOk = nativeCaps.Contains(container);
+            bool videoOk = NativeVideoOk(probe, client);
+            bool audioOk = probe.AudioStreams.Count == 0 || client.DecodesAudio(probe.AudioCodec);
+            bool containerOk = client.Has(container);
 
-            if (videoOk && audioOk && containerOk)
+            if (audioTrackIndex == 0 && videoOk && audioOk && containerOk)
             {
                 var nativeUrl = "/api/file?path=" + Uri.EscapeDataString(fullPath);
                 var nativeOut = BuildOutputInfo(probe, plan: null, isDirectPlay: true);
                 return new PlaybackDecision(true, nativeUrl, duration, nativeOut);
             }
-            if (videoOk && !probe.HasDolbyVision)
+            if (videoOk && !probe.HasDolbyVision && client.Has("mp4"))
             {
                 // Device decodes the video but not the audio (or can't demux the
-                // container) → /api/video: video stream-copy + audio→AAC. Still
-                // ~0% CPU compared to a full re-encode.
-                var remuxUrl = "/api/video?path=" + Uri.EscapeDataString(fullPath);
-                var remuxOut = BuildOutputInfo(probe, plan: null, isDirectPlay: false, isDirectStream: true);
-                return new PlaybackDecision(false, remuxUrl, duration, remuxOut, DirectStream: true);
+                // container, or wants another track) → /api/video: video
+                // stream-copy, audio copied when the device decodes it (else
+                // transcoded, AudioPolicy). Still ~0% CPU next to a re-encode.
+                return DirectStreamDecision(fullPath, track, client, audioTrackIndex, duration);
             }
             // Video codec beyond the device → HLS transcode as usual.
             return new PlaybackDecision(false, null, duration, null);
         }
 
-        if (IsDirectPlayEligible(container, probe, clientHevc, clientHevc10))
+        bool clientHevc = client.Hevc, clientHevc10 = client.Hevc10;
+        if (audioTrackIndex == 0 && IsDirectPlayEligible(container, probe, clientHevc, clientHevc10))
         {
             // /api/file serves the raw bytes with Range support — exactly what
             // <video> needs for native seek. URL-escape the path so spaces and
@@ -341,12 +354,28 @@ public sealed partial class HlsSessionService : IDisposable
             // why we route MKV here instead of HLS: original video bitstream +
             // HDR are preserved, and native playback outputs HDR more reliably
             // than MSE. The client owns the seek-reload dance (?seek=N).
-            var streamUrl = "/api/video?path=" + Uri.EscapeDataString(fullPath);
-            var output = BuildOutputInfo(probe, plan: null, isDirectPlay: false, isDirectStream: true);
-            return new PlaybackDecision(false, streamUrl, duration, output, DirectStream: true);
+            return DirectStreamDecision(fullPath, track, client, audioTrackIndex, duration);
         }
 
         return new PlaybackDecision(false, null, duration, null);
+    }
+
+    /// <summary>
+    /// The Direct Stream answer: the /api/video URL — carrying the track and
+    /// the client's caps, so the remux (and every <c>&amp;seek=N</c> reload the
+    /// client appends) maps that track and makes the same audio decision for
+    /// the same client — and the Info block for what it will deliver.
+    /// </summary>
+    private static PlaybackDecision DirectStreamDecision(string fullPath, ProbeInfo track, ClientCaps client,
+        int audioTrackIndex, double duration)
+    {
+        var url = "/api/video?path=" + Uri.EscapeDataString(fullPath)
+            + (audioTrackIndex > 0 ? "&audioTrackIndex=" + audioTrackIndex.ToString(CultureInfo.InvariantCulture) : "")
+            + client.ToQuery();
+        var audio = AudioPolicy.Decide(track.AudioCodec, track.AudioChannels, track.AudioProfile, client,
+            AudioOutput.Mp4Remux);
+        var output = BuildOutputInfo(track, plan: null, isDirectPlay: false, isDirectStream: true, audio: audio);
+        return new PlaybackDecision(false, url, duration, output, DirectStream: true);
     }
 
     /// <summary>Picks the HDR → SDR tone mapper for a re-encode of an HDR
@@ -380,7 +409,7 @@ public sealed partial class HlsSessionService : IDisposable
     /// paths it reports the post-transcode codec/bit-depth/HDR state.
     /// </summary>
     private static PlayerOutputInfo BuildOutputInfo(ProbeInfo probe, HlsPlan? plan, bool isDirectPlay,
-        bool isDirectStream = false, HdrToneMapper toneMapper = HdrToneMapper.None, bool externalAudio = false)
+        bool isDirectStream = false, HdrToneMapper toneMapper = HdrToneMapper.None, AudioDecision? audio = null)
     {
         // Re-encode paths flatten to H.264 8-bit SDR. Everything else preserves
         // the source bitstream (Direct Play, TS copy, fMP4 stream-copy).
@@ -433,14 +462,12 @@ public sealed partial class HlsSessionService : IDisposable
         };
 
         // Audio output reflects what the player actually receives, not the
-        // source. Audio is copied as-is only on Direct Play (raw file) and the
-        // TS path with a browser-native source codec; every other path — Direct
-        // Stream, fMP4 copy/reencode, TS with incompatible audio — transcodes to
-        // AAC stereo, so the Info block reports AAC 2.0 there, not e.g. TrueHD 7.1.
-        // On an HLS session probe's audio fields are the SELECTED track's
-        // (ProbeInfo.ForAudioTrack) — codec, channels and language alike.
-        bool audioCopied = isDirectPlay
-            || (plan == HlsPlan.TsStreamCopy && TsAudioPassthrough(probe.AudioCodec, externalAudio));
+        // source: the file's own track on Direct Play, else the stream's
+        // AudioDecision (a copy keeps codec + channels; a transcode reports
+        // e.g. AAC 2.0 or E-AC-3 5.1, not the source's TrueHD 7.1). probe's
+        // audio fields are the SELECTED track's (ProbeInfo.ForAudioTrack).
+        var audioCodecOut = isDirectPlay ? probe.AudioCodec ?? "" : audio?.Codec ?? "aac";
+        var audioChannelsOut = isDirectPlay ? probe.AudioChannels : audio?.Channels ?? 2;
 
         return new PlayerOutputInfo(
             Plan:            planName,
@@ -451,8 +478,8 @@ public sealed partial class HlsSessionService : IDisposable
             HdrFormats:      hdrFormats.ToArray(),
             Width:           probe.Width,
             Height:          probe.Height,
-            AudioCodec:      audioCopied ? (probe.AudioCodec ?? "") : "aac",
-            AudioChannels:   audioCopied ? probe.AudioChannels      : 2,
+            AudioCodec:      audioCodecOut,
+            AudioChannels:   audioChannelsOut,
             AudioLanguage:   probe.AudioLanguage ?? "",
             Transcoded:      !isDirectPlay && !isDirectStream,
             TranscodeReason: reason);
@@ -463,41 +490,20 @@ public sealed partial class HlsSessionService : IDisposable
     /// offered natively (device DV handling is a minefield — HLS path knows how
     /// to strip/serve it). 10-bit H.264 (High10) has no hardware decoders on
     /// TV SoCs → transcode.</summary>
-    private static bool NativeVideoOk(ProbeInfo probe, IReadOnlySet<string> caps)
+    private static bool NativeVideoOk(ProbeInfo probe, ClientCaps caps)
     {
         if (probe.HasDolbyVision) return false;
         var vc = (probe.VideoCodec ?? "").ToLowerInvariant();
         return vc switch
         {
-            "h264"  => !probe.Is10Bit && caps.Contains("h264"),
-            "hevc"  => caps.Contains(probe.Is10Bit ? "hevc10" : "hevc"),
-            "mpeg4" => caps.Contains("mpeg4"),
-            "mpeg2" or "mpeg2video" => caps.Contains("mpeg2"),
-            "vp9"   => caps.Contains("vp9"),
-            "vp8"   => caps.Contains("vp8"),
-            "av1"   => caps.Contains("av1"),
+            "h264"  => !probe.Is10Bit && caps.Has("h264"),
+            "hevc"  => caps.Has(probe.Is10Bit ? "hevc10" : "hevc"),
+            "mpeg4" => caps.Has("mpeg4"),
+            "mpeg2" or "mpeg2video" => caps.Has("mpeg2"),
+            "vp9"   => caps.Has("vp9"),
+            "vp8"   => caps.Has("vp8"),
+            "av1"   => caps.Has("av1"),
             _       => false,
-        };
-    }
-
-    /// <summary>Audio token check with the ffprobe→token aliases the client
-    /// derives from Android mime types.</summary>
-    private static bool NativeTokenOk(string? codec, IReadOnlySet<string> caps)
-    {
-        var c = (codec ?? "").ToLowerInvariant();
-        return c switch
-        {
-            "aac" or "mp4a"        => caps.Contains("aac"),
-            "mp3" or "mp2"         => caps.Contains("mp3"),
-            "ac3"                  => caps.Contains("ac3"),
-            "eac3" or "eac3_joc"   => caps.Contains("eac3"),
-            "dts"                  => caps.Contains("dts"),
-            "truehd"               => caps.Contains("truehd"),
-            "opus"                 => caps.Contains("opus"),
-            "vorbis"               => caps.Contains("vorbis"),
-            "flac"                 => caps.Contains("flac"),
-            _ when c.StartsWith("pcm") => caps.Contains("pcm"),
-            _                      => false,
         };
     }
 
@@ -579,11 +585,11 @@ public sealed partial class HlsSessionService : IDisposable
         // — see BuildFfmpegArgs. The video plan (TS vs fMP4) is unaffected; only
         // the audio mapping changes. null = use the source's own audio.
         string? externalAudioPath = null,
-        // True when the client reported it can decode HEVC (via
-        // MediaSource.isTypeSupported). Lets ChoosePlan ship HEVC as a
-        // stream-copy (Direct Stream — original bitstream, no re-encode)
-        // instead of transcoding it to H.264.
-        bool clientHevc = false,
+        // What the client decodes (ClientCaps: the nativeCaps tokens,
+        // maxAudioChannels, the clientHevc MSE flag). HEVC lets ChoosePlan ship
+        // HEVC as a stream-copy instead of transcoding it to H.264; the audio
+        // tokens + channel count drive AudioPolicy. null = legacy browser.
+        ClientCaps? client = null,
         // Cap output video bitrate in Mbps (player Bitrate menu). >0 forces a
         // re-encode at this bitrate; 0 = no cap. Carried on the session so
         // seek-restarts keep it (mirrors maxHeight).
@@ -594,6 +600,8 @@ public sealed partial class HlsSessionService : IDisposable
         SessionOwner? owner = null)
     {
         var who = owner ?? SessionOwner.Unknown;
+        var caps = client ?? ClientCaps.Legacy;
+        bool clientHevc = caps.Hevc;
         // The endpoint already validated these (ValidateStartOptions); keep the
         // encoder-safe invariants for any other caller: even cap, no negatives.
         maxHeight = Math.Max(0, maxHeight) & ~1;
@@ -712,6 +720,16 @@ public sealed partial class HlsSessionService : IDisposable
         var targetHeight = (maxHeight > 0 && (probe?.Height ?? 0) > 0 && maxHeight < probe!.Height)
             ? maxHeight : 0;
         var plan = probe is not null ? ChoosePlan(probe, maxHeight, clientHevc, maxBitrate) : HlsPlan.Fmp4StreamCopy;
+        // The audio half (AudioPolicy): copy the mapped track when the client
+        // decodes it and the plan's container (TS / fMP4) carries it, else
+        // transcode — 5.1 for a 5.1-capable client, else a stereo downmix. An
+        // external dub is always transcoded (its probe may have failed — then
+        // its codec and channels are unknown, so treat it as stereo).
+        var audio = AudioPolicy.Decide(
+            hasExternalAudio ? null : probe?.AudioCodec,
+            hasExternalAudio && externalProbe is null ? 2 : probe?.AudioChannels ?? 2,
+            probe?.AudioProfile, caps,
+            plan == HlsPlan.TsStreamCopy ? AudioOutput.HlsTs : AudioOutput.HlsFmp4);
         ProbeInfo? probeForPlaylist = probe;
         if (probe is not null && plan is HlsPlan.Fmp4VaapiReencode
                                       or HlsPlan.Fmp4NvencReencode
@@ -726,7 +744,7 @@ public sealed partial class HlsSessionService : IDisposable
                 : probe.Width;
             probeForPlaylist = probe with
             {
-                CodecsAttribute = "avc1.4d401f,mp4a.40.2",
+                CodecsAttribute = $"avc1.4d401f,{audio.CodecsTag}",
                 Width  = outW,
                 Height = outH,
             };
@@ -734,18 +752,13 @@ public sealed partial class HlsSessionService : IDisposable
         else if (probe is not null && plan == HlsPlan.TsStreamCopy)
         {
             // MPEG-TS branch: declare the source-native CODECS so browsers know
-            // what they're getting. Audio codec depends on passthrough decision
-            // for the SELECTED track (probe.AudioCodec is that track's).
-            var audioCodec = TsAudioPassthrough(probe.AudioCodec, hasExternalAudio)
-                ? probe.AudioCodec switch
-                {
-                    "ac3"   => "ac-3",
-                    "eac3"  => "ec-3",
-                    "mp3"   => "mp4a.40.34",
-                    _       => "mp4a.40.2",  // AAC
-                }
-                : "mp4a.40.2";
-            probeForPlaylist = probe with { CodecsAttribute = $"avc1.640028,{audioCodec}" };
+            // what they're getting; the audio part is what AudioPolicy decided
+            // for the SELECTED track (copied codec, or the transcode target).
+            probeForPlaylist = probe with { CodecsAttribute = $"avc1.640028,{audio.CodecsTag}" };
+        }
+        else if (probe is not null && plan == HlsPlan.Fmp4StreamCopy && probe.VideoCodecsAttribute is { } vAttr)
+        {
+            probeForPlaylist = probe with { CodecsAttribute = $"{vAttr},{audio.CodecsTag}" };
         }
         // Segment layout + where the first ffmpeg run starts (B18). The player
         // places the first fragment it loads at that fragment's ANNOUNCED start,
@@ -872,16 +885,16 @@ public sealed partial class HlsSessionService : IDisposable
         // seg-{startSegment}.{ext} so the on-disk layout matches the playlist
         // we wrote. PTS handling depends on the plan (see BuildFfmpegArgs).
         var toneMapper = ToneMapperFor(plan, probe);
-        _logger.LogInformation("HLS {Token}: plan={Plan} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H}) tonemap={ToneMap} {Owner}",
-            token, plan, (int)Math.Round(audioOffsetSec * 1000),
-            probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, toneMapper, who);
+        _logger.LogInformation("HLS {Token}: plan={Plan} audio={Audio} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H}) tonemap={ToneMap} client={Client} {Owner}",
+            token, plan, audio, (int)Math.Round(audioOffsetSec * 1000),
+            probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, toneMapper, caps, who);
         // ffmpeg starts at the segment start computed above (ffmpegSeekSec), not
         // at the resume point — the playlist's EXT-X-START still says seekSec.
         var args = BuildFfmpegArgs(fullPath, ffmpegSeekSec, dir, ffmpegMediaPath, ffmpegMasterName,
             probe, plan, startNumber: startSegment, reuseInit: false,
             targetHeight: targetHeight,
             audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex,
-            externalAudioPath: externalAudioPath, maxBitrate: maxBitrate, toneMapper: toneMapper);
+            externalAudioPath: externalAudioPath, maxBitrate: maxBitrate, toneMapper: toneMapper, audio: audio);
         // Stderr drain (Warning-level log) + the tail an early exit is explained with.
         var stderrTail = new StderrTail();
         Process proc;
@@ -901,6 +914,7 @@ public sealed partial class HlsSessionService : IDisposable
         {
             VideoStreamIndex = probe?.VideoStreamIndex ?? -1,
             Probe = probe,
+            Audio = audio,
         };
         _sessions[token] = session;
         // The caller gave up on this start (rapid Next/Prev, player closed
@@ -1024,7 +1038,7 @@ public sealed partial class HlsSessionService : IDisposable
         // resolution (it carries the scaled Width/Height), not the source.
         var output = probe is not null
             ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false, toneMapper: toneMapper,
-                externalAudio: hasExternalAudio)
+                audio: audio)
             : new PlayerOutputInfo(
                 Plan:            "unknown",
                 Container:       plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
@@ -1232,7 +1246,8 @@ public sealed partial class HlsSessionService : IDisposable
                 audioTrackIndex: session.AudioTrackIndex,
                 externalAudioPath: session.ExternalAudioPath,
                 maxBitrate: session.MaxBitrate,
-                toneMapper: session.ToneMapper);
+                toneMapper: session.ToneMapper,
+                audio: session.Audio);
 
             // Same launcher as StartAsync (stderr drained + logged per line).
             Process proc;

@@ -42,6 +42,15 @@ public sealed partial class HlsSessionService
         /// </summary>
         public double VideoEndSec { get; init; }
 
+        /// <summary>ffprobe profile of the mapped audio track ("DTS-HD MA",
+        /// "LC" …) — AudioPolicy picks the DTS core extract from it.</summary>
+        public string? AudioProfile { get; init; }
+
+        /// <summary>The video half of <see cref="CodecsAttribute"/> (hvc1… /
+        /// avc1…; null = unknown) — a copy plan pairs it with the CODECS of the
+        /// audio it actually sends.</summary>
+        public string? VideoCodecsAttribute { get; init; }
+
         /// <summary>Whole-file bitrate (bits/s, ffprobe <c>format.bit_rate</c>;
         /// 0 = unknown) — what a copy plan puts on the wire. A bitrate cap at or
         /// above it can't save anything and is ignored.</summary>
@@ -75,12 +84,15 @@ public sealed partial class HlsSessionService
                 return hasExternal ? this with { AudioLanguage = null } : this;
             }
             var a = list[audioTrackIndex];
-            return this with { AudioCodec = a.Codec, AudioChannels = a.Channels, AudioLanguage = a.Language };
+            return this with
+            {
+                AudioCodec = a.Codec, AudioChannels = a.Channels, AudioLanguage = a.Language, AudioProfile = a.Profile,
+            };
         }
     }
 
     /// <summary>One audio stream of a probed file.</summary>
-    private sealed record AudioStreamInfo(string? Codec, int Channels, string? Language);
+    private sealed record AudioStreamInfo(string? Codec, int Channels, string? Language, string? Profile = null);
 
     /// <summary>
     /// What ffmpeg invocation + segment shape this session needs. Decided once
@@ -260,27 +272,6 @@ public sealed partial class HlsSessionService
         if (_hardware?.Current.Vaapi.Available == true) return HlsPlan.Fmp4VaapiReencode;
         return HlsPlan.Fmp4SoftwareReencode;
     }
-
-    /// <summary>Audio codecs decoded natively by every MSE-capable browser
-    /// inside an MPEG-TS HLS stream. Conservative — AC3/E-AC3 work in
-    /// Chrome but not Firefox, and DTS/TrueHD/Atmos work nowhere; those
-    /// all fall through to AAC re-encoding. AAC + MP3 is the safe universe
-    /// for "the user's browser will definitely decode this passthrough".</summary>
-    private static bool IsBrowserCompatibleAudioInTs(string? codec) => (codec ?? "").ToLowerInvariant() switch
-    {
-        "aac" or "mp3" or "mp2" => true,
-        _ => false,
-    };
-
-    /// <summary>TS-path audio passthrough decision for the MAPPED track.
-    /// <paramref name="mappedAudioCodec"/> must be the codec of the stream
-    /// actually mapped (<see cref="ProbeInfo.ForAudioTrack"/>) — deciding on
-    /// track 0's codec while mapping track N (AC3/DTS/FLAC behind an AAC track
-    /// 0) stream-copied N: silence in the browser, or ffmpeg refusing
-    /// FLAC-in-TS. An external dub is always transcoded (its codec is
-    /// whatever the .mka holds).</summary>
-    private static bool TsAudioPassthrough(string? mappedAudioCodec, bool externalAudio)
-        => !externalAudio && IsBrowserCompatibleAudioInTs(mappedAudioCodec);
 
     private static string BuildMasterPlaylist(ProbeInfo p, long bandwidthBps = 0)
     {

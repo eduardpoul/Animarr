@@ -28,6 +28,10 @@ public sealed partial class HlsSessionService
         /// first run — its old hand-made minimal probe had no height, and the
         /// software re-encode fell back to 12 Mbps after every scrub.</summary>
         public ProbeInfo? Probe { get; init; }
+        /// <summary>What the start decided for the audio (AudioPolicy) — a
+        /// seek-restart must keep it, or a scrub would switch codec mid-stream
+        /// under the CODECS the playlist advertised.</summary>
+        public AudioDecision? Audio { get; init; }
         public string? VideoCodec { get; }
         // Codec of the MAPPED audio track (ProbeInfo.ForAudioTrack) from the
         // start probe — the seek-restart has no probe and needs it for the TS

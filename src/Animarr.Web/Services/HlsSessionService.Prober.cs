@@ -48,6 +48,7 @@ public sealed partial class HlsSessionService
             int videoStreamIndex = -1;    // absolute stream index of the main video (the `-map 0:N`)
             var audioStreams = new List<AudioStreamInfo>();   // every audio stream, 0:a:N order
             double videoEnd = 0;          // main video's own end (ProbeInfo.VideoEndSec)
+            string? audioProfile = null;  // first audio track's profile (ProbeInfo.AudioProfile)
 
             if (root.TryGetProperty("streams", out var streams))
             {
@@ -133,7 +134,8 @@ public sealed partial class HlsSessionService
                             else if (tags.TryGetProperty("LANGUAGE", out var langElU))
                                 language = langElU.GetString();
                         }
-                        audioStreams.Add(new AudioStreamInfo(codec, channels, language));
+                        string? aProfile = s.TryGetProperty("profile", out var apr) ? apr.GetString() : null;
+                        audioStreams.Add(new AudioStreamInfo(codec, channels, language, aProfile));
 
                         if (aCodec is null)
                         {
@@ -146,6 +148,7 @@ public sealed partial class HlsSessionService
                             aCodec = codec;
                             audioChannels = channels;
                             audioLanguage = language;
+                            audioProfile = aProfile;
                             audioCodecsAttr = "mp4a.40.2";
                         }
                     }
@@ -172,6 +175,8 @@ public sealed partial class HlsSessionService
                 VideoEndSec      = videoEnd,
                 BitRate          = bitRate,
                 VideoBitRate     = videoBitRate,
+                AudioProfile     = audioProfile,
+                VideoCodecsAttribute = videoCodecsAttr,
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

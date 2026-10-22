@@ -66,13 +66,18 @@ internal static class HlsEndpoints
             // Same flag for 10-bit / Main10 HEVC — gates Direct Play of HDR10 MP4s
             // (so they play on a native <video> where RTX VSR / HDR can engage).
             string? clientHevc10,
-            // Native (Android TV ExoPlayer) capability tokens, comma-separated:
-            // containers + codecs the DEVICE can demux/decode, probed from
-            // MediaCodecList (e.g. "mkv,avi,h264,mpeg4,ac3,aac"). When present,
-            // playback eligibility uses these instead of the browser rules —
+            // Client capability tokens, comma-separated: containers + codecs the
+            // client can demux/decode (the TV probes MediaCodecList, the web
+            // player MediaCapabilities — e.g. "mkv,avi,h264,mpeg4,ac3,aac") plus
+            // "hdr" / "dv". When present, playback eligibility AND the audio
+            // copy/transcode decision use these instead of the browser rules —
             // an AVI/XviD that would cost a full transcode for the web goes out
-            // as a raw /api/file to the TV.
+            // as a raw /api/file to the TV. Parsed by ClientCaps.
             string? nativeCaps,
+            // Most audio output channels the client plays (AudioContext
+            // destination.maxChannelCount on the web). >= 6 keeps 5.1 when the
+            // audio must be transcoded; absent = stereo.
+            int? maxAudioChannels,
             // Cap output bitrate in Mbps (player Bitrate menu). >0 forces a re-encode
             // at this bitrate; absent/0 = no cap.
             int? maxBitrate,
@@ -144,8 +149,7 @@ internal static class HlsEndpoints
             // Skip the Direct Play probe entirely when an external dub is in play:
             // combining foreign audio with the source video requires the HLS mux
             // path, so a direct file URL would silently drop the dub.
-            bool wantHevc   = clientHevc   == "1" || string.Equals(clientHevc,   "true", StringComparison.OrdinalIgnoreCase);
-            bool wantHevc10 = clientHevc10 == "1" || string.Equals(clientHevc10, "true", StringComparison.OrdinalIgnoreCase);
+            var client = ClientCaps.Parse(nativeCaps, maxAudioChannels, clientHevc, clientHevc10);
             // A height/bitrate cap (the HUD's Quality menu) that really shrinks
             // the stream forces a re-encode — you can't shrink a stream-copy —
             // so ChoosePlaybackAsync then skips BOTH native paths (Direct Play
@@ -153,22 +157,14 @@ internal static class HlsEndpoints
             // where maxHeight/maxBitrate apply; a cap at/above the source's own
             // height or bitrate keeps the native path. An external dub always
             // needs the HLS mux to combine foreign audio with the video.
-            // A non-default audio track likewise needs the HLS mux: Direct Play
-            // serves the raw file (the browser plays ITS default track) and the
-            // /api/video remux maps 0:a:0 — so picking e.g. the Russian dub in the
-            // HUD restarted onto the same native path and kept the Japanese audio
-            // while the picker showed Russian as selected.
-            bool wantTrack = (audioTrackIndex ?? 0) > 0;
-            IReadOnlySet<string>? caps = string.IsNullOrWhiteSpace(nativeCaps)
-                ? null
-                : nativeCaps.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                            .Select(t => t.ToLowerInvariant())
-                            .ToHashSet();
+            // A non-default audio track rules out Direct Play (the raw file plays
+            // ITS default track) but not Direct Stream: the /api/video remux maps
+            // the requested track (ChoosePlaybackAsync puts it in the URL).
             // RequestAborted: an abandoned start (rapid Next/Prev) stops waiting on
             // the probe and falls into the OperationCanceledException catch below.
-            var decision = externalAudioFull is null && !wantTrack
-                ? await hls.ChoosePlaybackAsync(fullPath!, wantHevc, wantHevc10, http.RequestAborted, nativeCaps: caps,
-                    maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0)
+            var decision = externalAudioFull is null
+                ? await hls.ChoosePlaybackAsync(fullPath!, client, http.RequestAborted,
+                    maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0)
                 : new HlsSessionService.PlaybackDecision(false, null, 0, null);
             // localTracks: the client switches the remembered track itself only
             // on Direct Play; Direct Stream maps 0:a:0, so anything else goes
@@ -245,7 +241,7 @@ internal static class HlsEndpoints
                 audioTrackIndex:  audioTrackIndex ?? 0,     // validated ≥ 0 above; range-checked in StartAsync
                 maxHeight:        effectiveMaxHeight,       // validated, even
                 externalAudioPath: externalAudioFull,
-                clientHevc:       wantHevc,
+                client:           client,
                 maxBitrate:       maxBitrate ?? 0,          // validated ≥ 0 above
                 // An abandoned start (rapid Next/Prev, player closed mid-start)
                 // stops its ffmpeg instead of encoding on for the 5-min idle GC.
