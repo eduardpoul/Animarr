@@ -13,6 +13,41 @@ namespace Animarr.Shared.Models;
 /// start (the file's duration for the last one).</param>
 public sealed record ChapterDto(int Index, string? Title, double StartSec, double EndSec);
 
+/// <summary><c>GET /api/media-facts?path=[&amp;wait=N]</c>: measured facts of a
+/// file, beyond what /api/probe says.</summary>
+/// <param name="DurationSec">The container's duration.</param>
+/// <param name="Video">The main video (null for audio-only files).</param>
+public sealed record MediaFactsDto(double? DurationSec, VideoFactsDto? Video);
+
+/// <summary>Picture geometry, including black bars baked into the frame.</summary>
+/// <param name="Width">Coded width in pixels.</param>
+/// <param name="Height">Coded height in pixels.</param>
+/// <param name="SampleAspect">Pixel aspect ("1:1", "4:3"); null when unknown
+/// (treat as square).</param>
+/// <param name="DisplayAspect">Width / height of the whole frame on screen
+/// (pixel aspect applied), e.g. 1.7778.</param>
+/// <param name="Crop">The picture inside the bars, in coded pixels; null when
+/// there are no bars, while detection is pending or when it couldn't tell.</param>
+/// <param name="ContentAspect">Width / height of the picture without its
+/// bars on screen (= <paramref name="DisplayAspect"/> without bars), e.g. 2.4.</param>
+/// <param name="Letterbox">Bars above and below.</param>
+/// <param name="Pillarbox">Bars left and right.</param>
+/// <param name="CropStatus">"detected" (bars found), "none" (no bars),
+/// "pending" (still measuring — ask again), "unknown" (could not tell, e.g.
+/// every sampled frame was black).</param>
+public sealed record VideoFactsDto(
+    int Width,
+    int Height,
+    string? SampleAspect,
+    double DisplayAspect,
+    CropRectDto? Crop,
+    double ContentAspect,
+    bool Letterbox,
+    bool Pillarbox,
+    string CropStatus);
+
+public sealed record CropRectDto(int X, int Y, int Width, int Height);
+
 /// <summary><c>GET /api/subtitle/tracks?path=[&amp;analyze=1]</c>: the subtitle
 /// tracks of a video (or of a standalone subtitle file — then one track,
 /// index 0) and the fonts attached to it.</summary>

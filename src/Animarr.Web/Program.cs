@@ -178,6 +178,9 @@ builder.Services.AddSingleton<MediaProbeCache>();
 // libass renderers (/api/subtitle/fonts, /api/subtitle/font).
 builder.Services.AddSingleton<SubtitleFontService>();
 builder.Services.AddSingleton<SubtitleTrackInfoService>();
+// Measured per-file facts (black-bar crop, …), stored per file version.
+builder.Services.AddSingleton<FileFactsStore>();
+builder.Services.AddSingleton<MediaFactsService>();
 builder.Services.AddSingleton<HlsSessionService>();
 // "Someone is watching" (HLS sessions + player progress pings) — background
 // full-file jobs (trickplay, chromaprint) park while it's true.

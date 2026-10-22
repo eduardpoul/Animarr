@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text.Json;
 using Animarr.Shared.Models;
 using Animarr.Web.Services;
 using Animarr.Web.Services.Auth;
@@ -9,12 +7,17 @@ namespace Animarr.Web.Endpoints;
 
 /// <summary>
 /// Per-file facts the players read next to <c>/api/probe</c>: chapters (timeline
-/// markers). Same authorization as the media endpoints — cookie or media token
-/// + <see cref="MediaPathValidator"/> (library roots, the profile's folders,
-/// link binding). Every answer is cached per file version server-side.
+/// markers) and measured media facts (black-bar crop). Same authorization as
+/// the media endpoints — cookie or media token + <see cref="MediaPathValidator"/>
+/// (library roots, the profile's folders, link binding). Every answer is
+/// cached per file version server-side.
 /// </summary>
 internal static class PlaybackFactsEndpoints
 {
+    /// <summary>Default and ceiling of <c>/api/media-facts?wait=</c>, seconds.</summary>
+    private const int DefaultWaitSec = 15;
+    private const int MaxWaitSec     = 60;
+
     public static IEndpointRouteBuilder MapPlaybackFactsEndpoints(this IEndpointRouteBuilder app)
     {
         // ─── /api/chapters — container chapters for timeline markers ──────────
@@ -33,7 +36,7 @@ internal static class PlaybackFactsEndpoints
                 .ToList();
             double? duration = null;
             if (chapters.Count > 0 && chapters[^1].EndSec <= chapters[^1].StartSec)
-                duration = FormatDuration(await probeCache.GetStreamsJsonAsync(fullPath!, ct));
+                duration = MediaFactsService.FormatDuration(await probeCache.GetStreamsJsonAsync(fullPath!, ct));
 
             var result = new List<ChapterDto>(chapters.Count);
             for (int i = 0; i < chapters.Count; i++)
@@ -50,21 +53,26 @@ internal static class PlaybackFactsEndpoints
         .WithName("GetChapters")
         .RequireAuthorization(MediaAuth.Policies.Media);
 
-        return app;
-    }
-
-    /// <summary><c>format.duration</c> of a cached ffprobe streams JSON.</summary>
-    internal static double? FormatDuration(string? probeJson)
-    {
-        if (string.IsNullOrWhiteSpace(probeJson)) return null;
-        try
+        // ─── /api/media-facts — measured facts (black-bar crop, 3.3) ──────────
+        // The crop is measured on the first request per file version (ffmpeg
+        // cropdetect on a few sampled frames, ~1–5 s) and stored. wait = how
+        // long this request may wait for it (default 15 s, 0 = don't); past
+        // that video.cropStatus is "pending" and a later call gets the result.
+        app.MapGet("/api/media-facts", async (
+            string path,
+            int? wait,
+            MediaPathValidator pathValidator,
+            MediaFactsService facts,
+            CancellationToken ct) =>
         {
-            using var doc = JsonDocument.Parse(probeJson);
-            return doc.RootElement.TryGetProperty("format", out var f)
-                   && f.TryGetProperty("duration", out var d) && d.ValueKind == JsonValueKind.String
-                   && double.TryParse(d.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var s) && s > 0
-                ? s : null;
-        }
-        catch (JsonException) { return null; }
+            var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryFileAsync(path, ct);
+            if (!ok) return earlyResult!;
+            var waitSec = Math.Clamp(wait ?? DefaultWaitSec, 0, MaxWaitSec);
+            return Results.Ok(await facts.GetAsync(fullPath!, TimeSpan.FromSeconds(waitSec), ct));
+        })
+        .WithName("GetMediaFacts")
+        .RequireAuthorization(MediaAuth.Policies.Media);
+
+        return app;
     }
 }
