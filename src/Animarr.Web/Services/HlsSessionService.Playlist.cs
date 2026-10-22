@@ -286,6 +286,23 @@ public sealed partial class HlsSessionService
             ? 0
             : Math.Max(0, maxBitrateMbps);
 
+    /// <summary>
+    /// The main reason code (<see cref="ReasonCodes"/>) for the plan
+    /// <see cref="ChoosePlan"/> picked — the same order of checks: a copy is a
+    /// container remux; a re-encode is the user's cap, else an interlaced
+    /// source for a browser, else Dolby Vision P5, else a codec the client
+    /// can't decode.
+    /// </summary>
+    private static string PlanReason(HlsPlan plan, ProbeInfo probe, ClientCaps client, int maxHeight, int maxBitrate)
+    {
+        if (plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy) return ReasonCodes.ContainerUnsupported;
+        if (maxHeight > 0 && probe.Height > 0 && maxHeight < probe.Height) return ReasonCodes.UserQualityCap;
+        if (maxBitrate > 0) return ReasonCodes.UserBitrateCap;
+        if (probe.Interlaced && !client.NativePlayer) return ReasonCodes.Interlaced;
+        if (DolbyVision.For(probe.Dovi, client) == DoviHandling.Reencode) return ReasonCodes.DolbyVision;
+        return ReasonCodes.CodecUnsupported;
+    }
+
     /// <summary>Pick the playback plan from the probe + detected hardware.
     ///   • Downscale OR bitrate cap requested → re-encode (GPU if available).
     ///   • H.264 (any bit depth) → MPEG-TS stream-copy. Works without any GPU.

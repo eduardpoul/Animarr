@@ -246,6 +246,11 @@ public sealed partial class HlsSessionService : IDisposable
     ///   • "vaapi-reencode"  — HEVC 8-bit → h264 via VAAPI (HDR lost)
     ///   • "nvenc-reencode"  — HEVC any-bit → h264 via NVENC (HDR lost)
     ///   • "fmp4-copy"       — HEVC 10-bit/HDR/DV passed through unchanged
+    ///
+    /// <see cref="TranscodeReason"/> is English text for the Info popup;
+    /// <see cref="TranscodeReasonCode"/> is the machine-readable main reason
+    /// (<see cref="ReasonCodes"/>) and <see cref="TranscodeReasonCodes"/> every
+    /// reason that applies, main one first — for a localized HUD.
     /// </summary>
     public sealed record PlayerOutputInfo(
         string  Plan,
@@ -260,7 +265,41 @@ public sealed partial class HlsSessionService : IDisposable
         int     AudioChannels,
         string  AudioLanguage,
         bool    Transcoded,
-        string? TranscodeReason);
+        string? TranscodeReason,
+        string? TranscodeReasonCode = null,
+        string[]? TranscodeReasonCodes = null);
+
+    /// <summary>
+    /// Machine-readable reasons for what the server did to a stream
+    /// (<c>output.transcodeReasonCode</c> / <c>transcodeReasonCodes</c>). The
+    /// first group explains a video re-encode, the second a remux / copy, the
+    /// last are side notes.
+    /// </summary>
+    public static class ReasonCodes
+    {
+        /// <summary>The user picked a height below the source's (Quality menu).</summary>
+        public const string UserQualityCap = "user_quality_cap";
+        /// <summary>The user picked a bitrate below the source's (Bitrate menu).</summary>
+        public const string UserBitrateCap = "user_bitrate_cap";
+        /// <summary>The client can't decode the video (codec / profile / bit depth: HEVC, Hi10P, AV1, MPEG-4 …).</summary>
+        public const string CodecUnsupported = "codec_unsupported";
+        /// <summary>Dolby Vision profile 5 without a DV decoder — re-encoded (tone-mapped).</summary>
+        public const string DolbyVision = "dolby_vision";
+        /// <summary>Interlaced video for a browser — re-encoded to deinterlace it.</summary>
+        public const string Interlaced = "interlaced";
+        /// <summary>The client can't open the container — remuxed (Direct Stream / HLS copy).</summary>
+        public const string ContainerUnsupported = "container_unsupported";
+        /// <summary>The audio is transcoded: the client can't decode it, or the container can't carry it.</summary>
+        public const string AudioUnsupported = "audio_unsupported";
+        /// <summary>A non-default audio track was picked (the raw file would play its default one).</summary>
+        public const string AudioTrack = "audio_track";
+        /// <summary>An external dub is muxed in.</summary>
+        public const string ExternalAudio = "external_audio";
+        /// <summary>HDR was tone-mapped to SDR on the re-encode.</summary>
+        public const string HdrTonemap = "hdr_tonemap";
+        /// <summary>HDR was re-encoded to SDR without a tone mapper (washed-out colours).</summary>
+        public const string HdrLost = "hdr_lost";
+    }
 
     /// <summary>
     /// Probe the source file and decide whether the browser can play it
@@ -353,7 +392,11 @@ public sealed partial class HlsSessionService : IDisposable
                 // container, or wants another track) → /api/video: video
                 // stream-copy, audio copied when the device decodes it (else
                 // transcoded, AudioPolicy). Still ~0% CPU next to a re-encode.
-                return DirectStreamDecision(fullPath, track, client, audioTrackIndex, duration);
+                var why = !containerOk ? ReasonCodes.ContainerUnsupported
+                    : !audioOk ? ReasonCodes.AudioUnsupported
+                    : audioTrackIndex > 0 ? ReasonCodes.AudioTrack
+                    : ReasonCodes.DolbyVision;   // a DV stream the raw file can't carry (P7 strip, dvh1 entry)
+                return DirectStreamDecision(fullPath, track, client, audioTrackIndex, duration, why);
             }
             // Video codec beyond the device → HLS transcode as usual.
             return new PlaybackDecision(false, null, duration, null);
@@ -379,7 +422,8 @@ public sealed partial class HlsSessionService : IDisposable
             // why we route MKV here instead of HLS: original video bitstream +
             // HDR are preserved, and native playback outputs HDR more reliably
             // than MSE. The client owns the seek-reload dance (?seek=N).
-            return DirectStreamDecision(fullPath, track, client, audioTrackIndex, duration);
+            return DirectStreamDecision(fullPath, track, client, audioTrackIndex, duration,
+                ReasonCodes.ContainerUnsupported);
         }
 
         return new PlaybackDecision(false, null, duration, null);
@@ -392,7 +436,7 @@ public sealed partial class HlsSessionService : IDisposable
     /// the same client — and the Info block for what it will deliver.
     /// </summary>
     private static PlaybackDecision DirectStreamDecision(string fullPath, ProbeInfo track, ClientCaps client,
-        int audioTrackIndex, double duration)
+        int audioTrackIndex, double duration, string reasonCode)
     {
         var url = "/api/video?path=" + Uri.EscapeDataString(fullPath)
             + (audioTrackIndex > 0 ? "&audioTrackIndex=" + audioTrackIndex.ToString(CultureInfo.InvariantCulture) : "")
@@ -400,7 +444,8 @@ public sealed partial class HlsSessionService : IDisposable
         var audio = AudioPolicy.Decide(track.AudioCodec, track.AudioChannels, track.AudioProfile, client,
             AudioOutput.Mp4Remux);
         var output = BuildOutputInfo(track, plan: null, isDirectPlay: false, isDirectStream: true, audio: audio,
-            dovi: DolbyVision.For(track.Dovi, client));
+            dovi: DolbyVision.For(track.Dovi, client), reasonCode: reasonCode,
+            extraReasons: audioTrackIndex > 0 ? [ReasonCodes.AudioTrack] : null);
         return new PlaybackDecision(false, url, duration, output, DirectStream: true);
     }
 
@@ -441,7 +486,10 @@ public sealed partial class HlsSessionService : IDisposable
     /// </summary>
     private static PlayerOutputInfo BuildOutputInfo(ProbeInfo probe, HlsPlan? plan, bool isDirectPlay,
         bool isDirectStream = false, HdrToneMapper toneMapper = HdrToneMapper.None, AudioDecision? audio = null,
-        DoviHandling dovi = DoviHandling.None, VideoTarget target = VideoTarget.H264)
+        DoviHandling dovi = DoviHandling.None, VideoTarget target = VideoTarget.H264,
+        // Why: the main reason code (ReasonCodes; null for Direct Play) and the
+        // details its text needs — the effective bitrate cap, the source codec.
+        string? reasonCode = null, int capMbps = 0, IEnumerable<string>? extraReasons = null)
     {
         // Re-encode paths flatten to H.264 8-bit SDR. Everything else preserves
         // the source bitstream (Direct Play, TS copy, fMP4 stream-copy).
@@ -494,15 +542,41 @@ public sealed partial class HlsSessionService : IDisposable
             : toneMapper != HdrToneMapper.None ? $" (HDR → SDR tone-mapped, {HdrToneMap.Describe(toneMapper)})"
             : " (HDR lost)";
         var outName = hevcOut ? "HEVC Main10" : "H.264";
-        string? reason = isDirectPlay || isDirectStream ? null : plan switch
+        // Why it was re-encoded, in words — the text used to say "for browser
+        // compatibility" even when the user had picked a lower quality.
+        var why = reasonCode switch
+        {
+            ReasonCodes.UserQualityCap => $"quality limited to {probe.Height}p",
+            ReasonCodes.UserBitrateCap => $"bitrate limited to {capMbps} Mbps",
+            ReasonCodes.Interlaced     => "deinterlaced for the browser",
+            ReasonCodes.DolbyVision    => "Dolby Vision profile 5 needs a DV decoder",
+            _                          => $"the client can't decode {DescribeVideo(probe)}",
+        };
+        string? reason = isDirectPlay ? null : isDirectStream
+            ? "Remuxed to MP4 — original video bitstream, no re-encode"
+            : plan switch
         {
             HlsPlan.TsStreamCopy      => "H.264 source remuxed to MPEG-TS for HLS delivery",
-            HlsPlan.Fmp4VaapiReencode => $"Re-encoded to {outName} via VAAPI (GPU) for browser compatibility" + hdrNote,
-            HlsPlan.Fmp4NvencReencode => $"Re-encoded to {outName} via NVENC (GPU) for browser compatibility" + hdrNote,
-            HlsPlan.Fmp4SoftwareReencode => "Re-encoded to H.264 via CPU (libx264) for the requested quality" + hdrNote,
+            HlsPlan.Fmp4VaapiReencode => $"Re-encoded to {outName} via VAAPI (GPU): {why}" + hdrNote,
+            HlsPlan.Fmp4NvencReencode => $"Re-encoded to {outName} via NVENC (GPU): {why}" + hdrNote,
+            HlsPlan.Fmp4SoftwareReencode => $"Re-encoded to H.264 via CPU (libx264): {why}" + hdrNote,
             HlsPlan.Fmp4StreamCopy    => "HEVC stream-copied to fMP4 — original bitstream, no re-encode (browser decodes HEVC; HDR/10-bit preserved)",
             _                          => null,
         };
+
+        // Every reason that applies, main one first: the HDR outcome of a
+        // re-encode, a transcoded audio track, the caller's extras (track, dub).
+        var codes = new List<string>();
+        if (!isDirectPlay)
+        {
+            if (reasonCode is not null) codes.Add(reasonCode);
+            if (isReencode && target != VideoTarget.Hevc10Hdr && HdrToneMap.IsHdr(probe.ColorTransfer, probe.HasDolbyVision))
+                codes.Add(toneMapper != HdrToneMapper.None ? ReasonCodes.HdrTonemap : ReasonCodes.HdrLost);
+            if (audio is { Copy: false } && reasonCode != ReasonCodes.ExternalAudio
+                && !(extraReasons?.Contains(ReasonCodes.ExternalAudio) ?? false))
+                codes.Add(ReasonCodes.AudioUnsupported);
+            foreach (var extra in extraReasons ?? []) if (!codes.Contains(extra)) codes.Add(extra);
+        }
 
         // Audio output reflects what the player actually receives, not the
         // source: the file's own track on Direct Play, else the stream's
@@ -525,7 +599,28 @@ public sealed partial class HlsSessionService : IDisposable
             AudioChannels:   audioChannelsOut,
             AudioLanguage:   probe.AudioLanguage ?? "",
             Transcoded:      !isDirectPlay && !isDirectStream,
-            TranscodeReason: reason);
+            TranscodeReason: reason,
+            TranscodeReasonCode: codes.Count > 0 ? codes[0] : null,
+            TranscodeReasonCodes: codes.ToArray());
+    }
+
+    /// <summary>"HEVC 10-bit", "H.264 10-bit", "MPEG-4" … for the reason text.</summary>
+    private static string DescribeVideo(ProbeInfo probe)
+    {
+        var name = (probe.VideoCodec ?? "").ToLowerInvariant() switch
+        {
+            "h264"  => "H.264",
+            "hevc"  => "HEVC",
+            "av1"   => "AV1",
+            "vp9"   => "VP9",
+            "vp8"   => "VP8",
+            "mpeg4" => "MPEG-4",
+            "mpeg2video" or "mpeg2" => "MPEG-2",
+            "vc1"   => "VC-1",
+            "" => "this video",
+            var other => other.ToUpperInvariant(),
+        };
+        return probe.Is10Bit ? name + " 10-bit" : name;
     }
 
     /// <summary>Codec eligibility against the client's capability tokens.
@@ -769,6 +864,11 @@ public sealed partial class HlsSessionService : IDisposable
         // What a re-encode writes: H.264 8-bit, or HEVC Main10 where the client
         // and this plan's encoder can (ChooseVideoTarget).
         var target = ChooseVideoTarget(plan, probe, caps);
+        // Why (output.transcodeReasonCode): the plan's reason, or for a copy the
+        // dub that forced the HLS mux instead of a native path.
+        var reasonCode = probe is null ? null
+            : plan is HlsPlan.TsStreamCopy or HlsPlan.Fmp4StreamCopy && hasExternalAudio ? ReasonCodes.ExternalAudio
+            : PlanReason(plan, probe, caps, maxHeight, maxBitrate);
         // The audio half (AudioPolicy): copy the mapped track when the client
         // decodes it and the plan's container (TS / fMP4) carries it, else
         // transcode — 5.1 for a 5.1-capable client, else a stereo downmix. An
@@ -1093,7 +1193,8 @@ public sealed partial class HlsSessionService : IDisposable
         // resolution (it carries the scaled Width/Height), not the source.
         var output = probe is not null
             ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false, toneMapper: toneMapper,
-                audio: audio, dovi: dovi, target: target)
+                audio: audio, dovi: dovi, target: target, reasonCode: reasonCode, capMbps: maxBitrate,
+                extraReasons: hasExternalAudio ? [ReasonCodes.ExternalAudio] : null)
             : new PlayerOutputInfo(
                 Plan:            "unknown",
                 Container:       plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
