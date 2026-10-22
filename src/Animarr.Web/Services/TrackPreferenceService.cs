@@ -3,6 +3,7 @@ using System.Text.Json;
 using Animarr.Shared.Models;
 using Animarr.Web.Data;
 using Animarr.Web.Data.Models;
+using Animarr.Web.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Animarr.Web.Services;
@@ -56,6 +57,8 @@ public sealed class TrackPreferenceService
     public const string KindAuto     = "auto";
 
     internal const int MaxAudioOffsetMs   = 3_000;
+    /// <summary>Highest <c>?season=</c> a row may be stored under.</summary>
+    public const int MaxSeason            = 999;
     private const int MaxSubtitleOffsetMs = 600_000;
 
     /// <summary>What <see cref="TrackPrefsUpdateRequest.Clear"/> may name:
@@ -606,9 +609,13 @@ public sealed class TrackPreferenceService
     /// <paramref name="videoFullPath"/> must already be validated by the
     /// caller (library roots + the profile's folders).
     /// </summary>
-    public async Task<UpdateResult> UpdateAsync(Guid userId, Guid mediaItemId, int? season,
+    /// <param name="role">The profile's role: a title outside its folders is
+    /// "Unknown title" (404), exactly like an id that doesn't exist.</param>
+    public async Task<UpdateResult> UpdateAsync(Guid userId, Role? role, Guid mediaItemId, int? season,
         TrackPrefsUpdateRequest req, string? videoFullPath, CancellationToken ct)
     {
+        if (season is < 0 or > MaxSeason)
+            return UpdateResult.Fail(400, $"season must be 0..{MaxSeason}.");
         var audioKind = req.Audio?.Kind?.Trim().ToLowerInvariant();
         var subKind   = req.Subtitle?.Kind?.Trim().ToLowerInvariant();
         if (audioKind is not (null or KindEmbedded or KindExternal or KindAuto))
@@ -622,7 +629,7 @@ public sealed class TrackPreferenceService
         if (choiceNeedsFile && videoFullPath is null)
             return UpdateResult.Fail(400, "path is required to record a track choice.");
         await using (var check = await _dbFactory.CreateDbContextAsync(ct))
-            if (!await check.MediaItems.AnyAsync(m => m.Id == mediaItemId, ct))
+            if (!await check.MediaItems.ApplyRoleFolderFilter(role).AnyAsync(m => m.Id == mediaItemId, ct))
                 return UpdateResult.Fail(404, "Unknown title.");
 
         EmbeddedTracks? embedded = null;

@@ -41,6 +41,7 @@ internal static class TrackPreferenceEndpoints
         {
             var uid = userCtx.CurrentUserId;
             if (uid is null) return Results.Unauthorized();
+            if (BadSeason(season) is { } bad) return bad;
             return Results.Ok(await prefs.GetAsync(uid.Value, mediaItemId, season, ct));
         }).RequireAuthorization();
 
@@ -57,6 +58,11 @@ internal static class TrackPreferenceEndpoints
         {
             var uid = userCtx.CurrentUserId;
             if (uid is null) return Results.Unauthorized();
+            if (BadSeason(season) is { } bad) return bad;
+            // The profile's role decides which titles exist for it: one outside
+            // its folders answers 404 like an unknown id (no existence oracle).
+            var me = await userCtx.GetCurrentUserAsync(ct);
+            if (me is null) return Results.Unauthorized();
 
             string? fullPath = null;
             if (!string.IsNullOrWhiteSpace(request.Path))
@@ -65,7 +71,7 @@ internal static class TrackPreferenceEndpoints
                 if (!ok) return earlyResult!;
                 fullPath = full;
             }
-            var result = await prefs.UpdateAsync(uid.Value, mediaItemId, season, request, fullPath, ct);
+            var result = await prefs.UpdateAsync(uid.Value, me.Role, mediaItemId, season, request, fullPath, ct);
             return result.Prefs is { } dto
                 ? Results.Ok(dto)
                 : Results.Problem(detail: result.Error, statusCode: result.Status,
@@ -81,10 +87,18 @@ internal static class TrackPreferenceEndpoints
         {
             var uid = userCtx.CurrentUserId;
             if (uid is null) return Results.Unauthorized();
+            if (BadSeason(season) is { } bad) return bad;
             await prefs.DeleteAsync(uid.Value, mediaItemId, season, ct);
             return Results.NoContent();
         }).RequireAuthorization();
 
         return app;
     }
+
+    /// <summary>400 for a <c>?season=</c> outside 0..<see cref="TrackPreferenceService.MaxSeason"/>.</summary>
+    private static IResult? BadSeason(int? season)
+        => season is < 0 or > TrackPreferenceService.MaxSeason
+            ? Results.Problem(detail: $"season must be 0..{TrackPreferenceService.MaxSeason}.",
+                statusCode: StatusCodes.Status400BadRequest, title: "Invalid track preference")
+            : null;
 }
