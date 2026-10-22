@@ -1175,15 +1175,14 @@ else
                 var playerLabels = L.WithPrefix("player.");
                 playerLabels["back"] = L["media_detail.btn_back"];
                 // Per-profile track memory (task 2.2): the previous file's last
-                // choices first (Next right after a pick), then what this file
-                // resolves to — the player needs the audio's remembered sync
-                // offset before it starts the stream (the start applies it).
+                // choices first (Next right after a pick), so this start
+                // resolves with them. The start itself (usePrefs) picks the
+                // audio and applies its sync offset server-side.
                 if (_trackPrefsSave is { IsCompleted: false } pending)
                     await Task.WhenAny(pending, Task.Delay(1500));
-                var trackDefaults = await ResolveTrackDefaultsAsync(_playerPath, TimeSpan.FromSeconds(2));
                 await JS.InvokeVoidAsync("animarrPlayer.attach",
                     _playerElementId, _playerSelfRef, _playerPath,
-                    new { autoAudio = true, labels = playerLabels, uiLang = L.CurrentLanguage, trackDefaults });
+                    new { autoAudio = true, labels = playerLabels, uiLang = L.CurrentLanguage });
 
                 // Push Now-Playing metadata so the OS lock screen / Control
                 // Centre / Bluetooth-stack media buttons show the right title

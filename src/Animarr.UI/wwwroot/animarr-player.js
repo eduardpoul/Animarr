@@ -666,7 +666,9 @@
         v = Math.max(-SUB_OFFSET_MAX, Math.min(SUB_OFFSET_MAX, v));
         entry.subOffset = v;
         applySubtitleOffset(entry);
-        if (save && entry.elementId) queueTrackPrefs(entry.elementId, { subtitleOffsetMs: Math.round(v * 1000) });
+        // 'reset': forget it for the title (an explicit 0 would be kept as 0).
+        if (save && entry.elementId)
+            queueTrackPrefs(entry.elementId, save === 'reset' ? { clear: ['subtitleOffset'] } : { subtitleOffsetMs: Math.round(v * 1000) });
         return v;
     }
     // Shifts the loaded track's cues the way Artplayer's own subtitleOffset
@@ -1596,7 +1598,7 @@
                 (d) => setSubtitleOffset(entry, (entry.subOffset || 0) + d, true));
             const reset = mkEl('button', 'vp-chip vp-chip--step', t('reset'));
             reset.type = 'button';
-            reset.addEventListener('click', () => { if (ready()) stepper.set(setSubtitleOffset(entry, 0, true)); });
+            reset.addEventListener('click', () => { if (ready()) stepper.set(setSubtitleOffset(entry, 0, 'reset')); });
             offCtl.appendChild(reset);
             body.appendChild(mkEl('div', 'vp-panel__hint', t('sub_offset_hint')));
 
@@ -1761,7 +1763,7 @@
                 fmt, ready, (d) => set((entry.audioOffsetMs || 0) + d));
             const reset = mkEl('button', 'vp-chip vp-chip--step', t('reset'));
             reset.type = 'button';
-            reset.addEventListener('click', () => { if (ready()) set(0); });
+            reset.addEventListener('click', () => { if (ready()) set(null); });
             ctl.appendChild(reset);
             const rangeRow = mkEl('div', 'vp-panel__ctl');
             rangeRow.appendChild(range);
@@ -2905,10 +2907,30 @@
             p = { mediaItemId: entry.mediaItemId, path: entry.mediaPath, ref: entry.dotnetRef, patch: {}, timer: null };
             PREFS_PENDING.set(elementId, p);
         }
-        Object.assign(p.patch, patch);
+        mergePrefsPatch(p.patch, patch);
         clearTimeout(p.timer);
         p.timer = setTimeout(() => flushTrackPrefs(elementId), PREFS_DEBOUNCE_MS);
         return true;
+    }
+    // A PUT stores values as given (an explicit 0 is remembered) and forgets
+    // facets named in `clear`, which the server applies after the values —
+    // so in a merged patch the later of "set X" / "forget X" must win.
+    const PREFS_CLEAR_KEY = { audio: 'audio', subtitle: 'subtitle', audioOffsetMs: 'audioOffset',
+                              subtitleOffsetMs: 'subtitleOffset', aspect: 'aspect' };
+    function mergePrefsPatch(into, patch) {
+        Object.keys(patch).forEach((k) => {
+            if (k === 'clear') {
+                const add = patch.clear || [];
+                Object.keys(PREFS_CLEAR_KEY).forEach((f) => { if (add.includes(PREFS_CLEAR_KEY[f])) delete into[f]; });
+                into.clear = Array.from(new Set([...(into.clear || []), ...add]));
+                return;
+            }
+            into[k] = patch[k];
+            if (into.clear && PREFS_CLEAR_KEY[k]) {
+                into.clear = into.clear.filter(c => c !== PREFS_CLEAR_KEY[k]);
+                if (!into.clear.length) delete into.clear;
+            }
+        });
     }
     /** Send what's queued for this element now; resolves to the server's ok. */
     function flushTrackPrefs(elementId) {
@@ -3331,10 +3353,13 @@
         const v = Math.round(Number(ms) || 0);
         return { hw: base.hw + v, sw: base.sw + v };
     }
-    /** The offset track defaults name for their audio: remembered, else the
-     *  dub's DELAY from its name, else 0. */
+    /** The offset track defaults name for their audio: remembered (0
+     *  included), else the dub's DELAY from its name, else 0 — the server
+     *  reports that effective value (audioOffsetSource); an older one sent
+     *  only the remembered value, so the DELAY is added here. */
     function defaultAudioOffset(td) {
         if (!td || !td.audio) return 0;
+        if (td.audioOffsetSource) return td.audioOffsetMs || 0;
         return td.audioOffsetMs || (td.audio.kind === 'external' && td.audio.delayMs) || 0;
     }
     function dubDelayMs(entry, path) {
@@ -3344,12 +3369,16 @@
     /** The Sync control changed the current audio's offset: shown at once,
      *  remembered (debounced PUT), applied by a restart once the user has
      *  stopped changing it for a moment. Returns the clamped value. */
+    /** `ms` null = Reset: forget the remembered value (the dub's DELAY or 0
+     *  applies again); any number — 0 included — is remembered as is. */
     function setAudioOffset(elementId, ms) {
         const entry = WIRED.get(elementId);
         if (!entry) return 0;
+        const reset = ms == null;
+        if (reset) ms = entry.currentExternalAudioPath ? dubDelayMs(entry, entry.currentExternalAudioPath) : 0;
         const v = Math.max(-AUDIO_OFFSET_MAX, Math.min(AUDIO_OFFSET_MAX, Math.round((Number(ms) || 0) / 10) * 10));
         entry.audioOffsetMs = v;
-        queueTrackPrefs(elementId, { audioOffsetMs: v });
+        queueTrackPrefs(elementId, reset ? { clear: ['audioOffset'] } : { audioOffsetMs: v });
         const kept = keepFor(elementId);
         clearTimeout(kept.syncTimer);
         kept.syncTimer = setTimeout(() => applyAudioOffset(elementId), 1200);
@@ -3607,9 +3636,9 @@
      *                                          (HLS only), see below.
      * @param {object} [opts.labels]           Localized player strings
      *                                          (LABEL_DEFAULTS keys).
-     * @param {object} [opts.trackDefaults]    The profile's TrackDefaultsDto for
-     *                                          this file, resolved by MediaDetail
-     *                                          before the start (task 2.2).
+     * @param {object} [opts.trackDefaults]    A TrackDefaultsDto to fall back on
+     *                                          when the start answer carries none
+     *                                          (task 2.2; optional).
      */
     async function attach(elementId, dotnetRef, mediaPath, opts) {
         // A fresh open: the server picks the audio from the profile's track
@@ -3673,11 +3702,11 @@
         // switchQuality so changing quality doesn't silently drop the dub.
         let externalAudioPath = (opts && typeof opts.externalAudioPath === 'string' && opts.externalAudioPath)
             ? opts.externalAudioPath : null;
-        // The current audio's own sync offset (2.8): a restart carries it; a
-        // fresh open takes the one MediaDetail's pre-start resolve names for
-        // the audio the start will pick.
-        const audioOffsetMs = (opts && Number.isFinite(opts.audioOffsetMs)) ? opts.audioOffsetMs
-            : usePrefs ? defaultAudioOffset(opts && opts.trackDefaults) : 0;
+        // The current audio's own sync offset (2.8) in what this start sends:
+        // a restart carries it (baseline + offset); a fresh open (usePrefs)
+        // sends only the pipeline baseline — the server adds the audio's
+        // offset itself and says so (trackDefaults.audioOffsetApplied).
+        const audioOffsetMs = (opts && Number.isFinite(opts.audioOffsetMs)) ? opts.audioOffsetMs : 0;
         if (typeof window.Artplayer !== 'function' || !window.Hls) {
             // Loaded on demand (see PLAYER_LIBS) — usually already warm from
             // MediaDetail's preload(), else this is the first-use fetch.
@@ -3846,10 +3875,16 @@
                 entry.currentAudIdx = audioTrackIndex;
                 entry.currentExternalAudioPath = externalAudioPath;
             }
-            // The pre-start resolve missed (or disagreed): the right offset
-            // comes in with the next restart (scheduled once the HUD is up).
+            // The audio's effective sync offset: in the stream already when
+            // the server added it; else (an older server, or a plan that
+            // takes none) it's what the Sync control shows, applied by a
+            // restart once the HUD is up where the plan can take it.
             const want = defaultAudioOffset(td);
-            if (started.trackDefaults && want !== audioOffsetMs) entry.audioOffsetMs = want;
+            if (started.trackDefaults && td.audioOffsetApplied) {
+                entry.audioOffsetMs = entry.streamAudioOffsetMs = want;
+            } else if (started.trackDefaults && want !== audioOffsetMs) {
+                entry.audioOffsetMs = want;
+            }
         }
         if (!manifestUrl && !directPlayUrl && !directStreamUrl) {
             showStartError(elementId, el, entry, { reason: t('error_empty') },
