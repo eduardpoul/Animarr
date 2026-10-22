@@ -559,7 +559,10 @@ public partial class PlayerPage : ContentPage
             // player selects it in Media3, the file keeps Direct Playing.
             var url = $"/api/hls/start?path={Uri.EscapeDataString(_filePath)}" +
                       $"&seek={seekSec}&maxHeight={maxHeight}" + Services.TvCodecCaps.HevcParams() + trackParams +
-                      "&usePrefs=1&localTracks=1";
+                      "&usePrefs=1&localTracks=1" +
+                      // What the audio output plays: ≥ 6 keeps 5.1 when the
+                      // server has to transcode the audio.
+                      $"&maxAudioChannels={Services.TvCodecCaps.MaxAudioChannels()}";
             if (!_forceTranscode && !Bench.BenchLog.Has("nocaps"))
             {
                 var caps = Services.TvCodecCaps.Get();

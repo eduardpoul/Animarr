@@ -16,9 +16,9 @@ namespace Animarr.App.Services;
 /// <list type="bullet">
 ///   <item>HEVC / AV1 / VP9 count only with a HARDWARE decoder — the software
 ///         ones (c2.android.*) list 4K but can't keep up on a TV-class CPU —
-///         and add a <c>&lt;codec&gt;.max=WxH</c> token: the largest picture a
-///         hardware decoder takes (<c>hevc.max=1920x1088</c> on a 1080p
-///         projector SoC). The server ignores tokens it doesn't know.</item>
+///         and add a <c>&lt;codec&gt;@WxH</c> token: the largest picture a
+///         hardware decoder takes (<c>hevc@1920x1088</c> on a 1080p projector
+///         SoC). The server keeps tokens it doesn't know (≤ 16 chars).</item>
 ///   <item>MPEG-4 Part 2 only with a hardware decoder that has Advanced Simple
 ///         Profile (XviD / DivX): the software one is Simple Profile up to
 ///         352×288.</item>
@@ -28,12 +28,37 @@ namespace Animarr.App.Services;
 /// <see cref="CanDecodeSize"/> applies the same decoder rules to a concrete
 /// picture size, and <see cref="HevcParams"/> derives the clientHevc flags
 /// from them instead of always claiming HEVC Main10.
+///
+/// The display and audio output can change between plays (another TV on the
+/// HDMI), so they are read on every <see cref="Get"/>: <c>hdr</c> when the
+/// display shows HDR10 / HLG, <c>dv</c> when a Dolby Vision decoder AND a DV
+/// display exist, and <see cref="MaxAudioChannels"/> from the HDMI sink.
 /// </summary>
 internal static class TvCodecCaps
 {
     private static string? _cached;
 
     public static string Get()
+    {
+        var codecs = CodecTokens();
+#if ANDROID
+        var display = DisplayTokens();
+        var all = display.Length == 0 ? codecs : codecs + "," + display;
+        if (all != _lastLogged)
+        {
+            _lastLogged = all;
+            global::Android.Util.Log.Info("Animarr.Caps", $"nativeCaps: {all} maxAudioChannels={MaxAudioChannels()}");
+        }
+        return all;
+#else
+        return codecs;
+#endif
+    }
+
+    private static string? _lastLogged;
+
+    /// <summary>Containers + codecs (MediaCodecList / FFmpeg — fixed per device).</summary>
+    private static string CodecTokens()
     {
         if (_cached is not null) return _cached;
 #if ANDROID
@@ -76,7 +101,7 @@ internal static class TvCodecCaps
                 LogDecoders(mime, usable);
                 if (usable.Count == 0) continue;
                 tokens.Add(token);
-                if (HwOnly.Contains(mime) && MaxSize(usable) is { } max) tokens.Add($"{token}.max={max}");
+                if (HwOnly.Contains(mime) && MaxSize(usable) is { } max) tokens.Add($"{token}@{max}");
             }
             // HEVC Main10 → the separate "hevc10" token (10-bit HDR gate).
             if (Usable("video/hevc").Any(d => Has10BitProfile("video/hevc", d.Caps))) tokens.Add("hevc10");
@@ -105,11 +130,68 @@ internal static class TvCodecCaps
 #else
         _cached = "";
 #endif
-#if ANDROID
-        global::Android.Util.Log.Info("Animarr.Caps", $"nativeCaps: {_cached}");
-#endif
         return _cached;
     }
+
+    /// <summary>Most channels the audio output plays — /api/hls/start and
+    /// /api/video maxAudioChannels (≥ 6 keeps 5.1 when the server transcodes
+    /// the audio). The HDMI / ARC / eARC sink's PCM channel counts; with
+    /// passthrough on "Авто" also 6 when it takes AC-3 / E-AC-3 / DTS
+    /// bitstreams (a soundbar on ARC: 2-ch PCM but 5.1 Dolby). No HDMI sink
+    /// (built-in speakers, the emulator) → 2.</summary>
+    public static int MaxAudioChannels()
+    {
+#if ANDROID
+        try
+        {
+            var am = global::Android.App.Application.Context.GetSystemService(global::Android.Content.Context.AudioService)
+                     as global::Android.Media.AudioManager;
+            if (am is null || !OperatingSystem.IsAndroidVersionAtLeast(23)) return 2;
+            int best = 2;
+            foreach (var d in am.GetDevices(global::Android.Media.GetDevicesTargets.Outputs) ?? Array.Empty<global::Android.Media.AudioDeviceInfo>())
+            {
+                int type = (int)d.Type;
+                // TYPE_HDMI 9, TYPE_HDMI_ARC 10, TYPE_HDMI_EARC 29.
+                if (type is not (9 or 10 or 29)) continue;
+                var counts = d.GetChannelCounts() ?? Array.Empty<int>();
+                if (counts.Length > 0) best = Math.Max(best, Math.Min(8, counts.Max()));
+                if (!TvPlaybackPrefs.PassthroughOff)
+                {
+                    // ENCODING_AC3 5, E_AC3 6, DTS 7, DTS_HD 8, E_AC3_JOC 18, DOLBY_TRUEHD 14.
+                    var enc = d.GetEncodings()?.Select(e => (int)e).ToArray() ?? Array.Empty<int>();
+                    if (enc.Any(e => e is 5 or 6 or 7 or 8 or 14 or 18)) best = Math.Max(best, 6);
+                }
+            }
+            return best;
+        }
+        catch { return 2; }
+#else
+        return 2;
+#endif
+    }
+
+#if ANDROID
+    /// <summary>"hdr" / "dv" from the display (and, for DV, a decoder).</summary>
+    private static string DisplayTokens()
+    {
+        try
+        {
+            if (!OperatingSystem.IsAndroidVersionAtLeast(24)) return "";
+            var dm = global::Android.App.Application.Context.GetSystemService(global::Android.Content.Context.DisplayService)
+                     as global::Android.Hardware.Display.DisplayManager;
+            var display = dm?.GetDisplay(global::Android.Views.Display.DefaultDisplay);
+#pragma warning disable CA1422 // deprecated on 34+ (per-mode HDR types) but still answered
+            var types = display?.GetHdrCapabilities()?.GetSupportedHdrTypes()?.Select(t => (int)t).ToArray() ?? Array.Empty<int>();
+#pragma warning restore CA1422
+            var tokens = new List<string>();
+            // HDR_TYPE_DOLBY_VISION 1, HDR10 2, HLG 3, HDR10_PLUS 4.
+            if (types.Any(t => t is 2 or 3 or 4)) tokens.Add("hdr");
+            if (types.Contains(1) && Decoders().TryGetValue("video/dolby-vision", out var dv) && dv.Count > 0) tokens.Add("dv");
+            return string.Join(',', tokens);
+        }
+        catch { return ""; }
+    }
+#endif
 
     /// <summary><c>&amp;clientHevc=1</c> / <c>&amp;clientHevc10=1</c> for
     /// /api/hls/start when this device plays HEVC (Main10) — what the server's
