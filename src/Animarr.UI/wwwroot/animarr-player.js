@@ -4281,11 +4281,17 @@
                         // every format, MKV included), else the video's own.
                         const bps = parseInt((data.format && data.format.bit_rate) || v.bit_rate
                             || (v.tags && (v.tags.BPS || v.tags['BPS-eng'])) || '0', 10) || 0;
+                        // The video stream's own rate — what the server's
+                        // re-encode clamp goes by (encodeMbpsFor).
+                        const tagBps = Object.entries(v.tags || {})
+                            .filter(([k]) => /^BPS(-|$)/i.test(k)).map(([, x]) => parseInt(x, 10)).find(n => n > 0) || 0;
+                        const videoBps = parseInt(v.bit_rate || '0', 10) || tagBps;
                         mediaInfo = {
                             videoCodec: v.codec_name || '',
                             width:      v.width || 0,
                             height:     v.height || 0,
                             bitrate:    bps,
+                            videoBitrate: videoBps,
                             bitDepth:   is10bit ? 10 : 8,
                             hdr:        hdrFormats[0] || 'sdr',
                             hdrFormats,
@@ -4817,8 +4823,10 @@
                     h: 0, b: 0,
                 }];
                 QUALITY_HEIGHTS.forEach(r => {
-                    if (srcH === 0 ? r <= 1080 : r < srcH)
-                        items.push({ label: r + 'p · ~' + fmtMbps(autoMbpsFor(r)) + ' ' + mbps, h: r, b: 0 });
+                    if (srcH === 0 ? r <= 1080 : r < srcH) {
+                        const est = encodeMbpsFor(entry, r, 0);
+                        items.push({ label: r + 'p' + (est != null ? ' · ~' + fmtMbps(est) + ' ' + mbps : ''), h: r, b: 0 });
+                    }
                 });
                 // Clearly below the source: its rate is the container's (audio
                 // included), so a cap within ~10 % of it saves next to nothing.
@@ -5215,7 +5223,7 @@
         } else if (rung < FALLBACK_TRANSCODE) {
             kept.tierFloor = rung + 1;
             const h = (entry.mediaInfo && entry.mediaInfo.height) || (entry.output && entry.output.height) || 1080;
-            kept.fallbackMbps = Math.max(2, Math.round(autoMbpsFor(h)));   // the server takes whole Mbps
+            kept.fallbackMbps = Math.max(2, Math.round(ladderMbps(h)));   // the server takes whole Mbps
             toastKey = 'fallback_switched';
         } else {
             try { entry.adapter.pause(); } catch {}
@@ -5238,10 +5246,28 @@
             }), beginOp(elementId));
     }
 
-    /** "~N Mbps" the server's re-encode ladder uses for an output height —
-     *  mirrors RateForHeight in HlsSessionService.Playlist.cs. */
-    function autoMbpsFor(h) {
-        return h <= 480 ? 2.5 : h <= 576 ? 3.5 : h <= 720 ? 6 : h <= 1080 ? 12 : h <= 1440 ? 24 : 40;
+    /** The server's re-encode ladder (Mbps) for an output height — mirrors
+     *  LadderKbps in HlsSessionService.Playlist.cs. */
+    function ladderMbps(h) {
+        return !(h > 0) ? 12 : h <= 360 ? 1.5 : h <= 480 ? 2.5 : h <= 576 ? 3.5 : h <= 720 ? 6
+             : h <= 1080 ? 12 : h <= 1440 ? 24 : 40;
+    }
+    /** The video bitrate (Mbps) a re-encode of THIS file to height `h` runs
+     *  at — mirrors RateFor: the ladder, never above what the source spends
+     *  (×1.5 for a HEVC / AV1 / VP9 source: H.264 needs more for the same
+     *  picture), under a "≤ N Mbps" cap, never below 0.8. null while the
+     *  source isn't probed (no honest estimate then). */
+    function encodeMbpsFor(entry, h, capMbps) {
+        const mi = entry && entry.mediaInfo;
+        if (!mi) return null;
+        let m = ladderMbps(h);
+        const srcBps = mi.videoBitrate > 0 ? mi.videoBitrate : (mi.bitrate || 0);
+        if (srcBps > 0) {
+            const efficient = /^(hevc|h265|av1|vp9)$/i.test(mi.videoCodec || '');
+            m = Math.min(m, srcBps / 1e6 * (efficient ? 1.5 : 1));
+        }
+        if (capMbps > 0) m = Math.min(m, capMbps);
+        return Math.max(m, 0.8);
     }
     // Quality menu rungs (plan 4.4): resolutions offered below the source…
     const QUALITY_HEIGHTS = [2160, 1440, 1080, 720, 576, 480, 360];
@@ -5262,7 +5288,10 @@
     /** "Original · 1080p" / "720p" / "≤ 6 Mbps · 1080p" — what was chosen. */
     function qualityChoiceText(entry) {
         const srcH = (entry.mediaInfo && entry.mediaInfo.height) || (entry.output && entry.output.height) || 0;
-        if (entry.currentMaxHeight > 0) return entry.currentMaxHeight + 'p · ~' + fmtMbps(autoMbpsFor(entry.currentMaxHeight)) + ' ' + t('unit_mbps');
+        if (entry.currentMaxHeight > 0) {
+            const est = encodeMbpsFor(entry, entry.currentMaxHeight, entry.currentMaxBitrate || 0);
+            return entry.currentMaxHeight + 'p' + (est != null ? ' · ~' + fmtMbps(est) + ' ' + t('unit_mbps') : '');
+        }
         if (entry.currentMaxBitrate > 0) return '≤ ' + entry.currentMaxBitrate + ' ' + t('unit_mbps') + (srcH ? ' · ' + srcH + 'p' : '');
         return t('quality_original') + (srcH ? ' · ' + srcH + 'p' : '');
     }
