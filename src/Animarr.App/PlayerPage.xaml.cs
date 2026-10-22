@@ -445,6 +445,7 @@ public partial class PlayerPage : ContentPage
         string? failure = null;
         string trackParams = "";
         bool capsSent = false;
+        bool superseded = false;
         StartResponse? body = null;
         try
         {
@@ -502,6 +503,10 @@ public partial class PlayerPage : ContentPage
                         try { pd = await resp.Content.ReadFromJsonAsync<StartProblem>(Json, ct); } catch { }
                         failure = $"{pd?.Detail ?? pd?.Title ?? "ошибка сервера"} (HTTP {status})";
                         Log($"start #{gen}: HTTP {status} code={pd?.Code} {pd?.Detail}");
+                        // 409 superseded: a newer start for this file from this
+                        // device replaced this one before it became playable —
+                        // that one plays; nothing to report or retry.
+                        if (status == 409 && pd?.Code == "superseded") { superseded = true; break; }
                         bool retryable = status >= 500 && status != 504
                                          && pd?.Code is not ("ffmpeg_exited" or "ffmpeg_timeout");
                         if (!retryable) break;
@@ -522,6 +527,17 @@ public partial class PlayerPage : ContentPage
         {
             Log($"start #{gen}: superseded");
             if (body?.Token is { } stale) StopHlsSession(stale);
+            return;
+        }
+        if (superseded)
+        {
+            // Not one of this page's starts (those are cancelled and caught
+            // above) — e.g. a duplicate request. Silently: no message, no
+            // retry, no fallback rung. A choice made for it is undone while
+            // the current stream still plays, so the menus show what plays.
+            Log($"start #{gen}: superseded on the server — ignored");
+            if (_kind != StreamKind.None && string.IsNullOrEmpty(NativePlayerService.Instance?.GetState()?.ErrorMessage))
+                onFail?.Invoke();
             return;
         }
         if (!HasStreamUrl(body))
@@ -640,7 +656,13 @@ public partial class PlayerPage : ContentPage
     /// <summary>/api/hls/start failed twice. If the previous stream still plays,
     /// it stays (with the settings it was started with — the menus read those
     /// back, so the switch is rolled back); otherwise the error stays on screen
-    /// and OK / play retries the same start.</summary>
+    /// and OK / play retries the same start.
+    /// <para>
+    /// The server keeps this device's previous HLS session alive when a
+    /// restart fails, so the old stream really does keep playing: _hlsToken is
+    /// only replaced by a successful start, and Tick's keepalive goes on
+    /// pinging the old token (an idle session is reaped after 5 min).
+    /// </para></summary>
     private void OnStartFailed(string reason, long resumeMs, int maxHeight, Action? onFail)
     {
         Log($"start failed: {reason} (maxHeight={maxHeight}, kind={_kind})");
