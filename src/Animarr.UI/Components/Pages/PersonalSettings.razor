@@ -13,6 +13,7 @@
 @inject ServerRegistryState ServerReg
 @inject ToastService Toasts
 @inject DeviceProfilesState DeviceProfiles
+@inject HttpClient Http
 @implements IDisposable
 
 @if (_keypadOpen && _keypadTarget is { } kt)
@@ -1217,6 +1218,13 @@
             <SettingsCard Icon="eye-off" Title="@L["profile.fillers_title"]" Description="@L["profile.fillers_hint"]">
                 <Toggle Checked="@_hideFillers" CheckedChanged="OnHideFillersToggle" />
             </SettingsCard>
+            @* Decoder failures the player reported for THIS device (task 6.1):
+               the server plays that kind of file another way for 30 days. *@
+            <SettingsCard Icon="refresh" Title="@L["profile.playback_errors_title"]" Description="@L["profile.playback_errors_desc"]">
+                <Btn Variant="solid" Size="md" Loading="@_failResetBusy" OnClick="ResetPlaybackErrorsAsync">
+                    @L["profile.playback_errors_reset"]
+                </Btn>
+            </SettingsCard>
         </SettingsGroup>
     };
 
@@ -1307,6 +1315,30 @@
 
     // ─── Hide fillers (global default; per-title override lives on MediaDetail) ──
     private bool _hideFillers;
+
+    // ─── Playback errors remembered for this device (task 6.1) ─────────
+    private bool _failResetBusy;
+    private sealed record FailureResetResult(int Removed);
+
+    /// <summary>DELETE /api/playback/failure — forget this device's decoder
+    /// failures, so the next starts try the best plan again.</summary>
+    private async Task ResetPlaybackErrorsAsync()
+    {
+        if (_failResetBusy) return;
+        _failResetBusy = true;
+        try
+        {
+            using var res = await Http.DeleteAsync("api/playback/failure");
+            if (res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadFromJsonAsync<FailureResetResult>();
+                Toasts.ShowSuccess(L.Get("profile.playback_errors_cleared", body?.Removed ?? 0));
+            }
+            else Toasts.ShowError(L["profile.playback_errors_failed"]);
+        }
+        catch { Toasts.ShowError(L["profile.playback_errors_failed"]); }
+        finally { _failResetBusy = false; StateHasChanged(); }
+    }
 
     private async Task OnHideFillersToggle(bool v)
     {

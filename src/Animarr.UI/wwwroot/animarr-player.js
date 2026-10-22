@@ -4644,9 +4644,11 @@
                         endAtBufferedTail(video);
                         return;
                     }
+                    const audioSide = data.sourceBufferName === 'audio'
+                        || /^audio\//.test(String(data.mimeType || ''));
                     handleStreamFailure(elementId, entry,
                         data.type === T.NETWORK_ERROR ? 'network' : 'decode',
-                        'hls.js: ' + (data.details || data.type));
+                        'hls.js: ' + (data.details || data.type), audioSide ? 'audio' : 'video');
                 });
             },
         } : {},
@@ -4751,7 +4753,7 @@
                 vHealth.addEventListener('loadeddata', () => {
                     setTimeout(() => {
                         if (vHealth.videoWidth === 0 && vHealth.readyState >= 2)
-                            handleStreamFailure(elementId, entry, 'decode', 'video track did not decode');
+                            handleStreamFailure(elementId, entry, 'decode', 'video track did not decode', 'video');
                     }, 1500);
                 }, { once: true });
             }
@@ -5364,13 +5366,56 @@
      *     it can't loop. Below transcode there is nothing left: the error
      *     panel (Retry / Back).
      * Position, pause, mute, subtitles and aspect carry over (captureState).
+     * A decode failure is reported to the server first (task 6.1,
+     * reportPlaybackFailure): it remembers it for this device, so later
+     * starts of this kind of stream skip the plan that failed by themselves.
+     * `track`: 'video' | 'audio' — which decoder failed, when known.
      */
-    function handleStreamFailure(elementId, entry, kind, detail) {
+    function handleStreamFailure(elementId, entry, kind, detail, track) {
         if (entry.failed || entry.abort.signal.aborted || WIRED.get(elementId) !== entry || !entry.adapter) return;
         entry.failed = true;
         const kept = keepFor(elementId);
         const rung = Math.max(entry.tier || 0, kept.tierFloor || 0);
         console.warn('animarrPlayer: stream failed (' + kind + ', rung ' + rung + '): ' + (detail || ''));
+        if (kind === 'decode') {
+            const snap = captureState(entry);
+            try { entry.adapter.pause(); } catch {}
+            reportPlaybackFailure(entry, detail, track).then((res) => {
+                if (res && res.next) console.info('animarrPlayer: failure recorded; next starts avoid', res.next);
+            }).finally(() => {
+                if (WIRED.get(elementId) === entry && !entry.abort.signal.aborted && entry.adapter)
+                    stepAfterFailure(elementId, entry, kind, detail, rung, snap);
+            });
+            return;
+        }
+        stepAfterFailure(elementId, entry, kind, detail, rung, captureState(entry));
+    }
+    /** POST /api/playback/failure for the stream that just failed to decode;
+     *  the answer (or null — no plan to name, offline, a slow server: it never
+     *  holds the fallback up for more than ~2.5 s). */
+    async function reportPlaybackFailure(entry, detail, track) {
+        const o = entry.output || {};
+        if (!o.plan || !entry.mediaPath) return null;
+        const audio = track === 'audio' && !!o.audioCodec;   // the server needs the codec for an audio report
+        const body = {
+            path: entry.mediaPath, plan: o.plan,
+            videoCodec: o.videoCodec || null, audioCodec: o.audioCodec || null,
+            error: String(detail || '').slice(0, 300),
+            track: audio ? 'audio' : 'video',
+        };
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 2500);
+        try {
+            const r = await fetch(apiUrl('/api/playback/failure'), {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body), signal: ctl.signal,
+            });
+            return r.ok ? await r.json() : null;
+        } catch { return null; }
+        finally { clearTimeout(timer); }
+    }
+    function stepAfterFailure(elementId, entry, kind, detail, rung, snap) {
+        const kept = keepFor(elementId);
         let toastKey;
         if (kind === 'network' && (kept.netRestarts || 0) < 2) {
             kept.netRestarts = (kept.netRestarts || 0) + 1;
@@ -5385,12 +5430,11 @@
             const el = document.getElementById(elementId);
             if (el) showStartError(elementId, el, entry, { reason: detail || '' },
                 () => attachStream(elementId, entry.dotnetRef, entry.mediaPath,
-                    Object.assign({}, currentPlan(entry), { forceResumeSec: entry.adapter ? entry.adapter.currentTime : 0 }),
+                    Object.assign({}, currentPlan(entry), { forceResumeSec: snap.pos }),
                     beginOp(elementId)),
                 'error_playback');
             return;
         }
-        const snap = captureState(entry);
         // Paused only if the USER paused — a stalled / errored element's own
         // state says nothing about what they wanted.
         snap.paused = !!entry.userPaused;
