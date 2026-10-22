@@ -547,10 +547,42 @@
         const pad = (n) => String(n).padStart(2, '0');
         return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
     }
+    // Strings from media files and the server (track / chapter titles,
+    // languages, external-track labels / folders / paths, font names, server
+    // reasons, problem details …) can be anything a torrent carried. They
+    // reach the DOM only as text: textContent / text nodes / attributes set
+    // through the DOM (popupRow, mkEl, renderCuesSafely), never through
+    // innerHTML. The few HTML templates left (the HUD, the volume and Up Next
+    // shells) hold only constants, numbers and lang-pack strings, escaped.
     function escapeHtml(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
         }[c]));
+    }
+    /** A popup's title + list shell, built as DOM (text only). */
+    function popupShell(popup, title) {
+        popup.appendChild(mkEl('div', 'vp-hud-popup__title', title));
+        const list = mkEl('div', 'vp-hud-popup__list');
+        popup.appendChild(list);
+        return list;
+    }
+    /** A list row button: text, data-i, extra classes (space-separated). */
+    function popupRow(list, label, i, cls) {
+        const b = mkEl('button', 'vp-hud-popup__item', label);
+        b.type = 'button';
+        b.dataset.i = String(i);
+        String(cls || '').split(/\s+/).filter(Boolean).forEach(c => b.classList.add(c));
+        list.appendChild(b);
+        return b;
+    }
+    /** Read-only info rows into `list` (replacing what is there). */
+    function fillInfoRows(list, rows, cls) {
+        list.textContent = '';
+        rows.forEach(l => list.appendChild(mkEl('div', 'vp-hud-popup__info' + (cls ? ' ' + cls : ''), l)));
+    }
+    /** A CSS url("…") for a URL (quotes / backslashes / newlines escaped). */
+    function cssUrl(u) {
+        return 'url("' + String(u || '').replace(/["\\\n\r\f]/g, c => '\\' + c.charCodeAt(0).toString(16) + ' ') + '")';
     }
     // ── Subtitle cue rendering (safe) ─────────────────────────────────
     // Artplayer paints the active cues with innerHTML; with `escape:false` the
@@ -1659,13 +1691,8 @@
         const popup = document.createElement('div');
         popup.className = 'vp-hud-popup vp-hud-popup--menu';
         popup.setAttribute('data-anchor', anchor);
-        popup.innerHTML = `
-            <div class="vp-hud-popup__title">${escapeHtml(title)}</div>
-            <div class="vp-hud-popup__list">
-                ${rows.map((r, i) => `
-                    <button class="vp-hud-popup__item" data-i="${i}">${escapeHtml(r.label)}</button>
-                `).join('')}
-            </div>`;
+        const menuList = popupShell(popup, title);
+        rows.forEach((r, i) => popupRow(menuList, r.label, i));
         popup.addEventListener('click', (e) => {
             const it = e.target.closest('[data-i]');
             if (!it) return;
@@ -1703,15 +1730,9 @@
         popup.className = 'vp-hud-popup';
         popup.setAttribute('data-anchor', anchor);
         const label = (it) => (it && typeof it === 'object') ? it.label : it;
-        const extra = (it) => (it && typeof it === 'object' && it.cls) ? ' ' + it.cls : '';
-        popup.innerHTML = `
-            <div class="vp-hud-popup__title">${escapeHtml(title)}</div>
-            <div class="vp-hud-popup__list">
-                ${items.map((it, i) => `
-                    <button class="vp-hud-popup__item${i === currentIdx ? ' is-active' : ''}${escapeHtml(extra(it))}"
-                            data-i="${i}">${escapeHtml(label(it))}</button>
-                `).join('')}
-            </div>`;
+        const extra = (it) => (it && typeof it === 'object' && it.cls) ? it.cls : '';
+        const pickList = popupShell(popup, title);
+        items.forEach((it, i) => popupRow(pickList, label(it), i, (i === currentIdx ? 'is-active ' : '') + extra(it)));
         popup.addEventListener('click', (e) => {
             const it = e.target.closest('[data-i]');
             if (!it) return;
@@ -1975,16 +1996,13 @@
         popup.className = 'vp-hud-popup vp-hud-popup--info';
         popup.setAttribute('data-anchor', anchor);
         const rows = (lines && lines.length) ? lines : [t('info_none')];
-        popup.innerHTML = `
-            <div class="vp-hud-popup__title">${escapeHtml(t('hud_info'))}</div>
-            <div class="vp-hud-popup__list">
-                ${rows.map(l => `<div class="vp-hud-popup__info">${escapeHtml(l)}</div>`).join('')}
-            </div>
-            ${details && details.rows && details.rows.length ? `
-            <details class="vp-hud-popup__details">
-                <summary class="vp-hud-popup__info">${escapeHtml(details.summary || '')}</summary>
-                ${details.rows.map(l => `<div class="vp-hud-popup__info vp-hud-popup__info--sub">${escapeHtml(l)}</div>`).join('')}
-            </details>` : ''}`;
+        fillInfoRows(popupShell(popup, t('hud_info')), rows);
+        if (details && details.rows && details.rows.length) {
+            const det = mkEl('details', 'vp-hud-popup__details');
+            det.appendChild(mkEl('summary', 'vp-hud-popup__info', details.summary || ''));
+            details.rows.forEach(l => det.appendChild(mkEl('div', 'vp-hud-popup__info vp-hud-popup__info--sub', l)));
+            popup.appendChild(det);
+        }
         root.appendChild(popup);
         setTimeout(() => {
             const onDoc = (e) => {
@@ -2780,7 +2798,7 @@
                 previewSprite = tp.spriteUrl;
                 refs.previewImg.style.width  = tp.tileWidth + 'px';
                 refs.previewImg.style.height = tp.tileHeight + 'px';
-                refs.previewImg.style.backgroundImage = 'url("' + tp.spriteUrl + '")';
+                refs.previewImg.style.backgroundImage = cssUrl(tp.spriteUrl);
                 // Natural sprite size keeps the tile math 1:1 — never scale it.
                 refs.previewImg.style.backgroundSize =
                     (tp.cols * tp.tileWidth) + 'px ' + (tp.rows * tp.tileHeight) + 'px';
@@ -5190,10 +5208,7 @@
             // If the Info popup is open, refresh its rows live (the 30s clock
             // tick also re-runs this).
             const openInfo = hudRoot.querySelector('.vp-hud-popup--info .vp-hud-popup__list');
-            if (openInfo) {
-                openInfo.innerHTML = (lines.length ? lines : [t('info_none')])
-                    .map(l => `<div class="vp-hud-popup__info">${escapeHtml(l)}</div>`).join('');
-            }
+            if (openInfo) fillInfoRows(openInfo, lines.length ? lines : [t('info_none')]);
         }
         updateMeta();
         entry.updateMeta = updateMeta;
