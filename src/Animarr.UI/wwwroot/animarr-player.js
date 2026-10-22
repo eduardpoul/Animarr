@@ -658,11 +658,15 @@
     // to whichever track is loaded (Artplayer keeps the shift per <track>, so
     // a newly loaded one starts at 0 until this re-applies it).
     const SUB_OFFSET_MAX = 10;   // same range as Artplayer's own offset control
-    function setSubtitleOffset(entry, sec) {
+    /** `save`: the user changed it — remember it for the title (track memory,
+     *  task 2.2: PUT subtitleOffsetMs, debounced). A restart / the title's
+     *  remembered value coming back in don't save. */
+    function setSubtitleOffset(entry, sec, save) {
         let v = Math.round((Number(sec) || 0) * 10) / 10;
         v = Math.max(-SUB_OFFSET_MAX, Math.min(SUB_OFFSET_MAX, v));
         entry.subOffset = v;
         applySubtitleOffset(entry);
+        if (save && entry.elementId) queueTrackPrefs(entry.elementId, { subtitleOffsetMs: Math.round(v * 1000) });
         return v;
     }
     // Shifts the loaded track's cues the way Artplayer's own subtitleOffset
@@ -1465,10 +1469,10 @@
                 [{ label: '−1', delta: -1 }, { label: '−0.1', delta: -0.1 },
                  { label: '+0.1', delta: 0.1 }, { label: '+1', delta: 1 }],
                 fmtOffset, ready,
-                (d) => setSubtitleOffset(entry, (entry.subOffset || 0) + d));
+                (d) => setSubtitleOffset(entry, (entry.subOffset || 0) + d, true));
             const reset = mkEl('button', 'vp-chip vp-chip--step', t('reset'));
             reset.type = 'button';
-            reset.addEventListener('click', () => { if (ready()) stepper.set(setSubtitleOffset(entry, 0)); });
+            reset.addEventListener('click', () => { if (ready()) stepper.set(setSubtitleOffset(entry, 0, true)); });
             offCtl.appendChild(reset);
             body.appendChild(mkEl('div', 'vp-panel__hint', t('sub_offset_hint')));
 
@@ -1503,6 +1507,8 @@
      *  vertical shift. Any pick here counts as the user's (no auto-crop
      *  over it). */
     function openPictureSettingsPopup(root, anchor, entry) {
+        // Every change here is the user's: remembered for the title (2.2).
+        const save = () => { if (entry.elementId) queueTrackPrefs(entry.elementId, { aspect: encodeView(entry) }); };
         openPanelPopup(root, anchor, t('picture'), (body, ready) => {
             const all = [];   // every mode chip, across the three rows: one choice
             const refresh = () => all.forEach(b => b.classList.toggle('is-active', b.dataset.value === (entry.currentAspect || 'fit')));
@@ -1518,6 +1524,7 @@
                         entry.aspectPicked  = true;   // even "Fit": no auto-crop over it
                         applyView(entry);
                         refresh();
+                        save();
                     });
                     ctl.appendChild(b);
                     all.push(b);
@@ -1535,6 +1542,7 @@
                 (d) => {
                     entry.zoom = Math.round(Math.max(1, Math.min(ZOOM_MAX, (entry.zoom || 1) + d)) * 100) / 100;
                     applyView(entry);
+                    save();
                     return entry.zoom;
                 });
             const panCtl = panelRow(body, t('picture_shift'));
@@ -1545,6 +1553,7 @@
                 (d) => {
                     entry.pan = Math.round(Math.max(-1, Math.min(1, (entry.pan || 0) + d)) * 10) / 10;
                     applyView(entry);
+                    save();
                     return entry.pan;
                 });
             const reset = mkEl('button', 'vp-chip vp-chip--step', t('reset'));
@@ -1553,6 +1562,7 @@
                 if (!ready()) return;
                 entry.zoom = 1; entry.pan = 0;
                 applyView(entry);
+                save();
                 zoomVal.set(1); panVal.set(0);
             });
             zoomCtl.appendChild(reset);
@@ -1822,6 +1832,37 @@
         if (m && (m[1] === 'force' ? FORCE_RATIOS : CROP_RATIOS).includes(m[2])) return { mode: m[1], ratio: m[2] };
         return { mode: ASPECT_MODES.includes(k) ? k : 'fit', ratio: null };
     }
+    /** Picture state ⇄ the aspect string kept in per-title track memory
+     *  (≤ 32 chars of [A-Za-z0-9:._-]): "<mode>[_z<zoom>][_p<pan>]", e.g.
+     *  "fit", "crop:2.35:1", "force:4:3_z1.25_p-0.3". */
+    function encodeView(entry) {
+        let s = entry.currentAspect || 'fit';
+        const z = entry.zoom || 1, p = entry.pan || 0;
+        if (z !== 1) s += '_z' + (Math.round(z * 100) / 100);
+        if (p) s += '_p' + (Math.round(p * 100) / 100);
+        return s;
+    }
+    /** → { aspect, zoom, pan }, or null for a string this player doesn't know. */
+    function decodeView(str) {
+        const parts = String(str || '').split('_');
+        const aspect = parts.shift();
+        if (!aspect || (parseAspect(aspect).mode === 'fit' && aspect !== 'fit')) return null;
+        let zoom = 1, pan = 0;
+        parts.forEach(x => {
+            const v = parseFloat(x.slice(1));
+            if (!Number.isFinite(v)) return;
+            if (x[0] === 'z') zoom = Math.max(1, Math.min(ZOOM_MAX, v));
+            else if (x[0] === 'p') pan = Math.max(-1, Math.min(1, v));
+        });
+        return { aspect, zoom, pan };
+    }
+    /** Two paths name the same file (server answers vs /api/external-tracks:
+     *  same source, but don't trust case / separators to match). */
+    function samePath(a, b) {
+        const n = (x) => String(x || '').replace(/\\/g, '/').toLowerCase();
+        return !!a && n(a) === n(b);
+    }
+
     /** Push entry's picture state (aspect, zoom, pan) to the adapter. */
     function applyView(entry) {
         if (entry && entry.adapter && entry.adapter.setView)
@@ -2730,6 +2771,55 @@
     function beginOp(elementId) { const t = ++OP_SEQ; LIVE_OP.set(elementId, t); return t; }
     function isLiveOp(elementId, t) { return LIVE_OP.get(elementId) === t; }
 
+    // ── Per-profile track memory writes (task 2.2) ───────────────────
+    // Every user change of audio / dub, subtitle, subtitle offset, audio
+    // offset or picture goes out as a partial PUT /api/me/track-prefs/
+    // {mediaItemId} (the title row) — through MediaDetail's signed-in
+    // HttpClient (SaveTrackPrefs): that REST API is cookie-only, out of reach
+    // of the MAUI WebView's cross-origin fetch. Debounced ~1 s and merged per
+    // player element, so dragging an offset or stepping the zoom writes once;
+    // flushed at detach (player closed / next episode, whose start MediaDetail
+    // holds until the save landed). A file outside any identified title
+    // (mediaItemId null) isn't remembered.
+    const PREFS_DEBOUNCE_MS = 1000;
+    const PREFS_PENDING = new Map();   // elementId → { mediaItemId, path, ref, patch, timer }
+    function queueTrackPrefs(elementId, patch) {
+        const entry = WIRED.get(elementId);
+        if (!entry || !entry.mediaItemId || !entry.dotnetRef) return false;
+        let p = PREFS_PENDING.get(elementId);
+        if (p && (p.mediaItemId !== entry.mediaItemId || p.path !== entry.mediaPath)) {
+            flushTrackPrefs(elementId);
+            p = null;
+        }
+        if (!p) {
+            p = { mediaItemId: entry.mediaItemId, path: entry.mediaPath, ref: entry.dotnetRef, patch: {}, timer: null };
+            PREFS_PENDING.set(elementId, p);
+        }
+        Object.assign(p.patch, patch);
+        clearTimeout(p.timer);
+        p.timer = setTimeout(() => flushTrackPrefs(elementId), PREFS_DEBOUNCE_MS);
+        return true;
+    }
+    /** Send what's queued for this element now; resolves to the server's ok. */
+    function flushTrackPrefs(elementId) {
+        const p = PREFS_PENDING.get(elementId);
+        if (!p) return Promise.resolve(false);
+        PREFS_PENDING.delete(elementId);
+        clearTimeout(p.timer);
+        try {
+            return Promise.resolve(p.ref.invokeMethodAsync('SaveTrackPrefs', p.mediaItemId,
+                    Object.assign({ path: p.path }, p.patch)))
+                .catch((e) => { console.warn('animarrPlayer: track prefs save failed', e); return false; });
+        } catch (e) {
+            console.warn('animarrPlayer: track prefs save failed', e);
+            return Promise.resolve(false);
+        }
+    }
+    /** The TrackChoiceRequest for an audio pick. */
+    function audioChoice(externalPath, index) {
+        return externalPath ? { kind: 'external', path: externalPath } : { kind: 'embedded', index: Math.max(0, index | 0) };
+    }
+
     function stopSession(token) {
         if (!token) return;
         try {
@@ -3144,15 +3234,22 @@
         // the re-encode (unless a quality cap already does).
         const maxBitrate = (tier >= FALLBACK_TRANSCODE && !(p.maxBitrate > 0) && !(p.maxHeight > 0))
             ? (p.fallbackMbps || 8) : (p.maxBitrate || 0);
+        // Audio: a fresh open asks for the profile's track defaults (usePrefs:
+        // title memory → profile language → flags, task 2.2 — the server starts
+        // on that audio directly, no second start); a restart names the audio
+        // it is on, index 0 included, so the server never re-resolves it.
+        const audioQuery = p.externalAudioPath
+            ? '&externalAudio=' + encodeURIComponent(p.externalAudioPath)
+            : p.usePrefs && !(p.audioTrackIndex > 0) ? '&usePrefs=1'
+            : '&audioTrackIndex=' + Math.max(0, p.audioTrackIndex | 0);
         const url = apiUrl('/api/hls/start?path=' + encodeURIComponent(mediaPath)
             + (p.resumeSec > 0 ? '&seek=' + p.resumeSec.toFixed(2) : '')
             + '&audioOffsetHwMs=' + p.offsets.hw
             + '&audioOffsetSwMs=' + p.offsets.sw
-            + (p.audioTrackIndex > 0 ? '&audioTrackIndex=' + p.audioTrackIndex : '')
+            + audioQuery
             + (p.maxHeight > 0 ? '&maxHeight=' + p.maxHeight : '')
             + (maxBitrate > 0 ? '&maxBitrate=' + maxBitrate : '')
-            + capsQuery(p.caps, tier)
-            + (p.externalAudioPath ? '&externalAudio=' + encodeURIComponent(p.externalAudioPath) : ''));
+            + capsQuery(p.caps, tier));
         let lastErr = null;
         for (let attempt = 0; attempt < 2; attempt++) {
             if (attempt > 0) {
@@ -3202,6 +3299,9 @@
                 directStreamUrl: (!data.directPlayUrl && data.directStreamUrl) || null,
                 sessionToken:    (!data.directPlayUrl && !data.directStreamUrl && data.token) || null,
                 manifestUrl:     (!data.directPlayUrl && !data.directStreamUrl && data.manifestUrl) || null,
+                // Per-profile track defaults (task 2.2; TrackDefaultsDto) —
+                // null from a server without track memory.
+                trackDefaults:   data.trackDefaults || null,
             };
         }
         throw lastErr;
@@ -3302,9 +3402,15 @@
      *                                          (HLS only), see below.
      * @param {object} [opts.labels]           Localized player strings
      *                                          (LABEL_DEFAULTS keys).
+     * @param {object} [opts.trackDefaults]    The profile's TrackDefaultsDto for
+     *                                          this file, resolved by MediaDetail
+     *                                          before the start (task 2.2).
      */
     async function attach(elementId, dotnetRef, mediaPath, opts) {
-        return attachStream(elementId, dotnetRef, mediaPath, opts, beginOp(elementId));
+        // A fresh open: the server picks the audio from the profile's track
+        // defaults (usePrefs) and reports them all for the player to apply.
+        return attachStream(elementId, dotnetRef, mediaPath,
+            Object.assign({}, opts, { usePrefs: true }), beginOp(elementId));
     }
 
     /**
@@ -3342,7 +3448,10 @@
             // only the stream goes — KEEP (session metadata) stays.
             teardown(elementId);
         }
-        const audioTrackIndex = (opts && Number.isFinite(opts.audioTrackIndex))
+        // A fresh open (attach): audio from the profile's track defaults, which
+        // the start answer then reports (and may change the two below).
+        const usePrefs = !!(opts && opts.usePrefs);
+        let audioTrackIndex = (opts && Number.isFinite(opts.audioTrackIndex))
             ? Math.max(0, opts.audioTrackIndex) : 0;
         // Output height cap (0 = original). Below source → server downscales.
         // Carried across re-attaches by switchQuality (mirrors audioTrackIndex).
@@ -3357,7 +3466,7 @@
         // Absolute path to an external dub audio file to mux in place of the
         // source's own audio. Carried across re-attaches by switchAudio /
         // switchQuality so changing quality doesn't silently drop the dub.
-        const externalAudioPath = (opts && typeof opts.externalAudioPath === 'string' && opts.externalAudioPath)
+        let externalAudioPath = (opts && typeof opts.externalAudioPath === 'string' && opts.externalAudioPath)
             ? opts.externalAudioPath : null;
         if (typeof window.Artplayer !== 'function' || !window.Hls) {
             // Loaded on demand (see PLAYER_LIBS) — usually already warm from
@@ -3390,17 +3499,19 @@
             externalAudioList: [], externalSubList: [],
             // Captured so switchAudio() can re-attach with a new audio index
             // without needing the .NET-side parameters again.
-            mediaPath, dotnetRef,
+            mediaPath, dotnetRef, elementId,
         };
         WIRED.set(elementId, entry);
         // Superseded (newer attach on this element) or closed (detach) — both
         // tear this entry down, which aborts `abort`; the op check also covers
         // the moments before any fetch is in flight.
         const stale = () => abort.signal.aborted || !isLiveOp(elementId, op);
-        // Same plan again, fresh token — the error panel's Retry.
+        // Same plan again, fresh token — the error panel's Retry (a fresh
+        // open's retry is a fresh open again: the profile picks the audio).
         const retryOpts = (resumeAt) => ({
             audioTrackIndex, externalAudioPath, maxHeight, maxBitrate,
-            forceResumeSec: resumeAt,
+            forceResumeSec: resumeAt, usePrefs,
+            trackDefaults: opts && opts.trackDefaults,
         });
 
         if (typeof window.Artplayer !== 'function') {
@@ -3446,7 +3557,7 @@
         if (!started) {
             try {
                 started = await startStream(mediaPath, {
-                    resumeSec, offsets, caps, audioTrackIndex, maxHeight, maxBitrate, externalAudioPath,
+                    resumeSec, offsets, caps, audioTrackIndex, maxHeight, maxBitrate, externalAudioPath, usePrefs,
                     // Fallback floor reached earlier on this player (1.7).
                     tier: (KEEP.get(elementId) || {}).tierFloor || 0,
                     fallbackMbps: (KEEP.get(elementId) || {}).fallbackMbps,
@@ -3481,6 +3592,28 @@
         const manifestUrl     = started.manifestUrl;
         const directPlayUrl   = started.directPlayUrl;
         const directStreamUrl = started.directStreamUrl;
+
+        // ── Per-profile track defaults (task 2.2) ─────────────────────
+        // Every start answer carries them (TrackDefaultsDto); MediaDetail's
+        // pre-start resolve is the fallback. mediaItemId null = a file outside
+        // any identified title: its choices aren't remembered (no PUT).
+        const td = started.trackDefaults || (opts && opts.trackDefaults) || null;
+        entry.trackDefaults = td;
+        entry.mediaItemId   = (td && td.mediaItemId) || null;
+        // The audio a usePrefs start went out with: what the server mapped
+        // (`applied`), or — Direct Play of a file whose default is track 0 —
+        // what the browser plays anyway. The menus and every later restart
+        // (quality, fallback) name it explicitly from here on.
+        if (usePrefs && td && td.audio) {
+            const a = td.audio;
+            const onRaw = a.kind === 'embedded' && !(a.index > 0) && !!(directPlayUrl || directStreamUrl);
+            if (a.applied || onRaw) {
+                externalAudioPath = a.kind === 'external' && a.path ? a.path : null;
+                audioTrackIndex   = externalAudioPath ? 0 : Math.max(0, a.index | 0);
+                entry.currentAudIdx = audioTrackIndex;
+                entry.currentExternalAudioPath = externalAudioPath;
+            }
+        }
         if (!manifestUrl && !directPlayUrl && !directStreamUrl) {
             showStartError(elementId, el, entry, { reason: t('error_empty') },
                 () => attachStream(elementId, dotnetRef, mediaPath, retryOpts(resumeSec), beginOp(elementId)));
@@ -3642,12 +3775,21 @@
         // Closed / superseded during the probe or the external-track fetch.
         if (stale()) return;
 
-        // Initial subtitle track per the account's subtitle mode
-        // (pickDefaultSubtitle). Pure client-side overlay — never
-        // influences the video/audio pipeline. An embedded pick goes in
-        // as Artplayer's initial track; a sidecar one is switched to
-        // right after creation (as on a restart).
-        if (!(restore && restore.sub)) {
+        // Initial subtitle track: what the profile's track defaults resolved
+        // (title memory → subtitle mode / language → flags, server side),
+        // else — a server without track memory — the account's subtitle mode
+        // applied here (pickDefaultSubtitle). Pure client-side overlay — never
+        // influences the video/audio pipeline. An embedded pick goes in as
+        // Artplayer's initial track; a sidecar one is switched to right after
+        // creation (as on a restart).
+        const tdSub = (td && td.subtitle) || null;
+        if (!(restore && restore.sub) && tdSub) {
+            if (tdSub.kind === 'embedded' && tdSub.index >= 0 && tdSub.index < subtitleList.length)
+                initialSubIdx = tdSub.index;
+            else if (tdSub.kind === 'external' && tdSub.path)
+                pickedExtSub = externalSubList.find(s => samePath(s.path, tdSub.path)) || null;
+            // 'off' → none
+        } else if (!(restore && restore.sub)) {
             const playingAudio = externalAudioPath
                 ? normLang((externalAudioList.find(x => x.path === externalAudioPath) || {}).language)
                 : normLang((audioList.find(a => a.index === audioTrackIndex) || {}).lang);
@@ -3863,8 +4005,11 @@
         // to track 0 (and the block-scoped pick was never visible here), so the
         // menu showed "Track 1" while another track — or none — was on screen.
         entry.currentSubIdx = initialSubIdx >= 0 ? initialSubIdx : null;
-        // Subtitle offset: carried over by a restart, else none yet.
-        entry.subOffset = (restore && Number.isFinite(restore.subOffset)) ? restore.subOffset : 0;
+        // Subtitle offset: carried over by a restart, else the title's
+        // remembered one (track defaults), else none.
+        entry.subOffset = (restore && Number.isFinite(restore.subOffset)) ? restore.subOffset
+            : (td && td.subtitleOffsetMs) ? Math.max(-SUB_OFFSET_MAX, Math.min(SUB_OFFSET_MAX, td.subtitleOffsetMs / 1000))
+            : 0;
         // A sidecar subtitle — restored by a restart or picked by the
         // subtitle mode (embedded ones went in via the initial track above;
         // Off simply loads none).
@@ -3876,11 +4021,14 @@
         }
 
         // Picture: Fit unless a restart carries the replaced stream's
-        // mode / zoom / pan (and whether the user picked it) over.
-        entry.currentAspect = (restore && restore.aspect) || 'fit';
-        entry.aspectPicked  = !!(restore && restore.aspectPicked);
-        entry.zoom          = (restore && restore.zoom) || 1;
-        entry.pan           = (restore && restore.pan) || 0;
+        // mode / zoom / pan (and whether the user picked it) over, or the
+        // title remembers one (track defaults) — a remembered picture is the
+        // user's own choice, so no auto-crop over it either.
+        const rememberedView = !restore && td && td.aspect ? decodeView(td.aspect) : null;
+        entry.currentAspect = (restore && restore.aspect) || (rememberedView && rememberedView.aspect) || 'fit';
+        entry.aspectPicked  = !!(restore && restore.aspectPicked) || !!rememberedView;
+        entry.zoom          = (restore && restore.zoom) || (rememberedView && rememberedView.zoom) || 1;
+        entry.pan           = (restore && restore.pan) || (rememberedView && rememberedView.pan) || 0;
         if (entry.currentAspect !== 'fit' || entry.zoom !== 1 || entry.pan !== 0) {
             applyView(entry);
             // Again once the stream is up (Artplayer sizes the ratio box
@@ -3888,15 +4036,14 @@
             adapter.once('loadedmetadata', () => applyView(entry));
         }
 
-        // ── Preferred audio language — HLS transcode path ONLY ──────────────
-        // Direct Play / Direct Stream serve the raw container and the browser
-        // plays its default audio track; switching to a non-default track there
-        // would require a transcode, so we deliberately DON'T touch those paths
-        // (Direct Play is never sacrificed for an audio-language preference).
-        // On a transcoding HLS session we're re-muxing anyway, so re-selecting
-        // the matching-language stream is free. Runs once per user-initiated
-        // open (opts.autoAudio) — never on switchAudio/switchQuality re-attaches.
-        if (opts && opts.autoAudio && entry.sessionToken && PREFS.audioLang
+        // ── Preferred audio language — servers WITHOUT track memory only ────
+        // A server with it picks the profile's audio itself on the first
+        // start (usePrefs) and answers trackDefaults; this second start
+        // (B11) is only the fallback for an older server (the phone app can
+        // talk to one). HLS only: Direct Play / Direct Stream serve the raw
+        // container and are never sacrificed for an audio-language
+        // preference. Once per user-initiated open (opts.autoAudio).
+        if (opts && opts.autoAudio && !started.trackDefaults && entry.sessionToken && PREFS.audioLang
             && Array.isArray(audioList) && audioList.length > 1) {
             const want = audioList.findIndex(a => normLang(a.lang) === PREFS.audioLang);
             if (want > 0 && want !== entry.currentAudIdx) {
@@ -3950,6 +4097,7 @@
                 entry.zoom = zoom;
                 entry.pan  = pan;
                 applyView(entry);
+                queueTrackPrefs(elementId, { aspect: encodeView(entry) });
             },
             getView: () => ({ zoom: entry.zoom || 1, pan: entry.pan || 0 }),
             offset: () => {
@@ -3973,6 +4121,13 @@
                         switchAudio(elementId, {
                             audioTrackIndex:   o.kind === 'embedded' ? o.index : 0,
                             externalAudioPath: o.kind === 'external' ? o.path : null,
+                        }).then((ok) => {
+                            // Remembered for the title once it actually plays
+                            // (a failed switch keeps — and keeps remembering —
+                            // the previous audio).
+                            if (ok) queueTrackPrefs(elementId, {
+                                audio: audioChoice(o.kind === 'external' ? o.path : null, o.index),
+                            });
                         });
                     });
             },
@@ -4003,10 +4158,13 @@
                         setTimeout(() => openSubtitleSettingsPopup(hudRoot, 'cc', entry, entry.art.template.$player), 0);
                         return;
                     }
+                    // Each pick is remembered for the title (2.2): embedded by
+                    // its s:N, a sidecar by its path, or Off.
                     if (i === 0) {
                         adapter.setSubtitle(null);
                         entry.currentSubIdx = null;
                         entry.currentExtSubPath = null;
+                        queueTrackPrefs(elementId, { subtitle: { kind: 'off' } });
                         return;
                     }
                     const idx = i - 1;
@@ -4015,11 +4173,13 @@
                         adapter.setSubtitle({ url: s.url, name: s.name, type: 'vtt' });
                         entry.currentSubIdx = idx;
                         entry.currentExtSubPath = null;
+                        queueTrackPrefs(elementId, { subtitle: { kind: 'embedded', index: idx } });
                     } else {
                         const s = ext[idx - emb.length];
                         adapter.setSubtitle({ url: externalSubUrl(s.path), name: s.label, type: 'vtt' });
                         entry.currentSubIdx = null;
                         entry.currentExtSubPath = s.path;
+                        queueTrackPrefs(elementId, { subtitle: { kind: 'external', path: s.path } });
                     }
                 });
             },
@@ -4321,6 +4481,8 @@
     /** Player closed (or Blazor moving on to another episode): drop the
      *  stream AND everything kept for restarts of this element. */
     function detach(elementId) {
+        // A choice made in the last second still goes to the track memory.
+        flushTrackPrefs(elementId);
         // Any start still in flight for this element is now stale (B27).
         LIVE_OP.delete(elementId);
         teardown(elementId);
@@ -4534,10 +4696,12 @@
      * answer stops its own session instead of resurrecting a player.
      *
      * @param {'audio'|'quality'} kind  Picks the failure message.
+     * @returns {Promise<boolean>} true once the new plan plays (false: kept
+     *                              the previous one, superseded, or stale).
      */
     async function restartStream(elementId, changes, kind) {
         const entry = WIRED.get(elementId);
-        if (!entry || !entry.adapter || !entry.dotnetRef || !entry.mediaPath) return;
+        if (!entry || !entry.adapter || !entry.dotnetRef || !entry.mediaPath) return false;
         const op = beginOp(elementId);
         // A switch still warming up is superseded: abort its start.
         if (entry.pendingSwitch) { try { entry.pendingSwitch.abort(); } catch {} }
@@ -4566,14 +4730,14 @@
         if (!isLiveOp(elementId, op)) {
             // Closed, next episode, or a newer switch took over meanwhile.
             if (started) stopSession(started.sessionToken);
-            return;
+            return false;
         }
         entry.switchSnap = null;
 
         if (started) {
             await attachStream(elementId, entry.dotnetRef, entry.mediaPath,
                 Object.assign({}, plan, { forceResumeSec: snap.pos, prestarted: started, restore: snap }), op);
-            return;
+            return true;
         }
 
         if (failure && failure.superseded) {
@@ -4583,7 +4747,7 @@
             // would just take the stream back. Leave the player paused.
             console.info('animarrPlayer: ' + kind + ' switch superseded by a newer start, dropping it');
             if (entry.art) { try { entry.art.loading.show = false; } catch {} }
-            return;
+            return false;
         }
         console.warn('animarrPlayer: ' + kind + ' switch failed, keeping the previous stream', failure);
         const title  = t(kind === 'audio' ? 'error_audio' : 'error_quality');
@@ -4593,15 +4757,16 @@
         // continues; re-opening the previous plan is the fallback for a
         // session that died meanwhile (reaped, server restarted).
         const alive  = await previousStreamAlive(entry);
-        if (!isLiveOp(elementId, op) || WIRED.get(elementId) !== entry) return;
+        if (!isLiveOp(elementId, op) || WIRED.get(elementId) !== entry) return false;
         if (alive) {
             if (entry.art) { try { entry.art.loading.show = false; } catch {} }
             if (!snap.paused) entry.adapter.play();
             showToast(entry.hudRoot, title, detail);
-            return;
+            return false;
         }
         await attachStream(elementId, entry.dotnetRef, entry.mediaPath,
             Object.assign({}, prev, { forceResumeSec: snap.pos, toast: { title, detail }, restore: snap }), op);
+        return false;
     }
 
     /**

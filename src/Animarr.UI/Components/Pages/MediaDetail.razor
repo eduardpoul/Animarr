@@ -4,6 +4,9 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject UserContextState UserCtx
+@* The signed-in HttpClient (cookie) — per-profile track memory, which the
+   player's own fetch can't reach from the MAUI WebView (REST is cookie-only). *@
+@inject HttpClient Http
 
 @*
     Media detail — Fluent 2 (A1) title page.
@@ -1171,9 +1174,16 @@ else
                 // the track languages ("Japanese" / "Японский").
                 var playerLabels = L.WithPrefix("player.");
                 playerLabels["back"] = L["media_detail.btn_back"];
+                // Per-profile track memory (task 2.2): the previous file's last
+                // choices first (Next right after a pick), then what this file
+                // resolves to — the player needs the audio's remembered sync
+                // offset before it starts the stream (the start applies it).
+                if (_trackPrefsSave is { IsCompleted: false } pending)
+                    await Task.WhenAny(pending, Task.Delay(1500));
+                var trackDefaults = await ResolveTrackDefaultsAsync(_playerPath, TimeSpan.FromSeconds(2));
                 await JS.InvokeVoidAsync("animarrPlayer.attach",
                     _playerElementId, _playerSelfRef, _playerPath,
-                    new { autoAudio = true, labels = playerLabels, uiLang = L.CurrentLanguage });
+                    new { autoAudio = true, labels = playerLabels, uiLang = L.CurrentLanguage, trackDefaults });
 
                 // Push Now-Playing metadata so the OS lock screen / Control
                 // Centre / Bluetooth-stack media buttons show the right title
@@ -1454,6 +1464,58 @@ else
     }
 
     [JSInvokable] public async Task ClosePlayerFromJs() => await InvokeAsync(ClosePlayer);
+
+    // ── Per-profile track memory (task 2.2) ──────────────────────────────
+    // The player JS reads the resolved defaults from every /api/hls/start
+    // answer, but /api/me/track-prefs is cookie-only REST — unreachable from
+    // the MAUI WebView's cross-origin fetch — so its reads / writes go through
+    // the signed-in HttpClient here. The last save is kept so the next attach
+    // (Next right after a pick) resolves with it.
+    private Task? _trackPrefsSave;
+
+    /// <summary>What a playback of <paramref name="path"/> starts with for this
+    /// profile (title memory → profile settings → flags); null on any failure
+    /// (older server, no title) — the player then uses its own defaults.</summary>
+    private async Task<TrackDefaultsDto?> ResolveTrackDefaultsAsync(string path, TimeSpan timeout)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            return await Http.GetFromJsonAsync<TrackDefaultsDto>(
+                $"api/me/track-prefs/resolve?path={Uri.EscapeDataString(path)}", cts.Token);
+        }
+        catch { return null; }
+    }
+
+    [JSInvokable]
+    public Task<TrackDefaultsDto?> ResolveTrackPrefs(string path) =>
+        ResolveTrackDefaultsAsync(path, TimeSpan.FromSeconds(3));
+
+    /// <summary>Partial update of the title row (no season) with what the user
+    /// just picked on <c>request.Path</c>. True when the server took it.</summary>
+    [JSInvokable]
+    public Task<bool> SaveTrackPrefs(Guid mediaItemId, TrackPrefsUpdateRequest request)
+    {
+        var save = SaveTrackPrefsAsync(mediaItemId, request);
+        _trackPrefsSave = save;
+        return save;
+    }
+
+    private async Task<bool> SaveTrackPrefsAsync(Guid mediaItemId, TrackPrefsUpdateRequest request)
+    {
+        try
+        {
+            using var res = await Http.PutAsJsonAsync($"api/me/track-prefs/{mediaItemId}", request);
+            if (!res.IsSuccessStatusCode)
+                Console.Error.WriteLine($"track-prefs PUT {(int)res.StatusCode}: {await res.Content.ReadAsStringAsync()}");
+            return res.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"track-prefs PUT failed: {ex.Message}");
+            return false;
+        }
+    }
 
     private async Task ReidentifyAsync()
     {
