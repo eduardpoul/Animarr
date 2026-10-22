@@ -1958,7 +1958,9 @@
     // Shows the post-transcode video/audio details (resolution, codec, bit
     // depth, HDR, audio, playback path) that used to live in the top-right meta
     // line. Toggled by the bottom "Info" button.
-    function openInfoPopup(root, anchor, lines) {
+    /** `details`: { summary, rows } shown collapsed under the rows (the
+     *  server's plan candidates), or null. */
+    function openInfoPopup(root, anchor, lines, details) {
         const existing = root.querySelector('.vp-hud-popup');
         if (existing) {
             const wasFor = existing.getAttribute('data-anchor');
@@ -1973,7 +1975,12 @@
             <div class="vp-hud-popup__title">${escapeHtml(t('hud_info'))}</div>
             <div class="vp-hud-popup__list">
                 ${rows.map(l => `<div class="vp-hud-popup__info">${escapeHtml(l)}</div>`).join('')}
-            </div>`;
+            </div>
+            ${details && details.rows && details.rows.length ? `
+            <details class="vp-hud-popup__details">
+                <summary class="vp-hud-popup__info">${escapeHtml(details.summary || '')}</summary>
+                ${details.rows.map(l => `<div class="vp-hud-popup__info vp-hud-popup__info--sub">${escapeHtml(l)}</div>`).join('')}
+            </details>` : ''}`;
         root.appendChild(popup);
         setTimeout(() => {
             const onDoc = (e) => {
@@ -3278,9 +3285,21 @@
         reason_audio_unsupported:     'audio converted for this device',
         reason_audio_track:           'another audio track',
         reason_external_audio:        'external dub mixed in',
-        reason_audio_sync:            'remuxed to apply the remembered audio sync',
+        reason_audio_sync:            'streamed to apply the audio sync',
         reason_hdr_tonemap:           'HDR tone-mapped to SDR',
         reason_hdr_lost:              'HDR lost',
+        reason_decoder_limit:         "too large for this device's decoder",
+        reason_audio_renditions:      'streamed so the audio can switch live',
+        reason_device_failed_before:  'this device failed on a better way before',
+        reason_remux_hls:             'the remux comes as HLS',
+        reason_remux_unsupported:     "this device can't take the remux",
+        reason_not_applicable:        'not needed for this file',
+        reason_probe_failed:          'the file could not be probed',
+        reason_not_chosen:            'not chosen',
+        info_candidates:              'How the server chose',
+        candidate_selected:           'chosen',
+        candidate_skipped:            'skipped',
+        candidate_fallback:           'fallback',
         // HUD (buttons, tooltips, menus)
         hud_play_pause:     'Play / pause',
         hud_play:           'Play',
@@ -3961,6 +3980,9 @@
                 // audioRenditions=1: the EXT-X-MEDIA audio group, in
                 // hls.audioTracks order (null = audio muxed in).
                 audioRenditions: (Array.isArray(data.audioRenditions) && data.audioRenditions.length) ? data.audioRenditions : null,
+                // The ordered plan list the server judged (selected / skipped
+                // / fallback + reasons) — Info shows it, collapsed.
+                candidates:      Array.isArray(data.candidates) ? data.candidates : null,
             };
         }
         throw lastErr;
@@ -4294,6 +4316,7 @@
         entry.totalDuration = started.totalDuration;
         entry.resumeOffset  = started.resumeSec;
         entry.output        = started.output;
+        entry.candidates    = started.candidates || null;
         entry.tier          = tierOfPlan(started.output, started);   // fallback rung (1.7)
         const manifestUrl     = started.manifestUrl;
         const directPlayUrl   = started.directPlayUrl;
@@ -4999,7 +5022,9 @@
                     switchQuality(elementId, it.h, it.b);
                 });
             },
-            info: () => openInfoPopup(hudRoot, 'info', entry.infoLines || []),
+            info: () => openInfoPopup(hudRoot, 'info', entry.infoLines || [],
+                entry.candidates && entry.candidates.length
+                    ? { summary: t('info_candidates'), rows: candidateRows(entry.candidates) } : null),
             speed: () => {
                 const cur = readRatePref();
                 openPickerPopup(hudRoot, 'speed', t('hud_speed'),
@@ -5503,7 +5528,20 @@
     // the fallback for a code this player doesn't know yet.
     const REASON_CODES = ['user_quality_cap', 'user_bitrate_cap', 'codec_unsupported', 'dolby_vision', 'interlaced',
         'burned_subtitle', 'container_unsupported', 'audio_unsupported', 'audio_track', 'external_audio',
-        'audio_sync', 'hdr_tonemap', 'hdr_lost'];
+        'audio_sync', 'hdr_tonemap', 'hdr_lost', 'decoder_limit', 'audio_renditions', 'device_failed_before',
+        // only in candidates[]
+        'remux_hls', 'remux_unsupported', 'not_applicable', 'probe_failed', 'not_chosen'];
+    /** One reason code, localized (the code itself when unknown). */
+    function reasonLabel(code) {
+        return REASON_CODES.includes(code) ? t('reason_' + code) : String(code || '');
+    }
+    /** candidates[] as Info rows: "HLS · TS stream-copy — skipped: …". */
+    function candidateRows(list) {
+        return (list || []).map((c) => {
+            const why = (c.reasons || []).map(reasonLabel).filter(Boolean).join(', ');
+            return planName(c.plan) + ' — ' + t('candidate_' + (c.status || 'skipped')) + (why ? ': ' + why : '');
+        });
+    }
     /** Why the stream isn't the file as is, localized; '' for Direct Play. */
     function reasonText(output) {
         if (!output) return '';
