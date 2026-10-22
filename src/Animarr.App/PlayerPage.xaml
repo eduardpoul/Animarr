@@ -106,6 +106,20 @@
                 </Border>
             </HorizontalStackLayout>
 
+            <!-- TV: the scrub preview over the thumb — the trickplay frame (when
+                 the server has a sprite) + time · chapter -->
+            <Border x:Name="ScrubPreview" IsVisible="False" InputTransparent="True" ZIndex="5"
+                    HorizontalOptions="Start" VerticalOptions="End" Padding="0"
+                    BackgroundColor="#F21a1a1a" Stroke="#E6FFFFFF" StrokeThickness="2"
+                    StrokeShape="RoundRectangle 8">
+                <VerticalStackLayout Spacing="0">
+                    <Image x:Name="ScrubPreviewImage" IsVisible="False" WidthRequest="240" HeightRequest="136"
+                           Aspect="Fill" />
+                    <Label x:Name="ScrubPreviewTime" TextColor="White" FontFamily="sans-serif-medium" FontSize="14"
+                           HorizontalOptions="Center" Margin="12,5" />
+                </VerticalStackLayout>
+            </Border>
+
             <!-- bottom: progress + time + controls -->
             <Grid x:Name="BottomBar" VerticalOptions="End" HeightRequest="180">
                 <BoxView>
@@ -121,14 +135,19 @@
                         <Label Grid.Column="0" x:Name="PositionLabel" Text="0:00" TextColor="White"
                                FontFamily="sans-serif" FontSize="13" VerticalOptions="Center" />
                         <!-- seek bar + chapter ticks (laid out in code-behind); the
-                             phone drags a Slider instead of the TV's progress bar -->
-                        <Grid x:Name="ScrubRow" Grid.Column="1" VerticalOptions="Center" HeightRequest="14">
+                             phone drags a Slider instead of the TV's progress bar,
+                             which is a D-pad stop with a thumb (PlayerPage.Scrub.cs) -->
+                        <Grid x:Name="ScrubRow" Grid.Column="1" VerticalOptions="Center" HeightRequest="20">
                             <ProgressBar x:Name="Scrubber" Progress="0"
                                          ProgressColor="#bb5000" VerticalOptions="Center" />
                             <Slider x:Name="ScrubSlider" IsVisible="False" Minimum="0" Maximum="1"
                                     MinimumTrackColor="#bb5000" MaximumTrackColor="#66FFFFFF" ThumbColor="#f49157"
                                     VerticalOptions="Center" />
                             <AbsoluteLayout x:Name="ChapterMarks" InputTransparent="True" />
+                            <AbsoluteLayout x:Name="ScrubThumbLayer" InputTransparent="True">
+                                <Border x:Name="ScrubThumb" IsVisible="False" WidthRequest="18" HeightRequest="18"
+                                        StrokeThickness="0" StrokeShape="RoundRectangle 9" BackgroundColor="White" />
+                            </AbsoluteLayout>
                         </Grid>
                         <Label Grid.Column="2" x:Name="DurationLabel" Text="0:00" TextColor="#d6d6d6"
                                FontFamily="sans-serif" FontSize="13" VerticalOptions="Center" />

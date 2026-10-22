@@ -242,6 +242,7 @@ public partial class PlayerPage : ContentPage
             return true;    // swallow the key that opened the menu
         }
         ArmAutoHide();      // keep it up while the user navigates
+        if (_scrubFocused && HandleScrubKey(kc)) return true;
 #endif
         return false;       // focus navigation drives the buttons
     }
@@ -345,6 +346,7 @@ public partial class PlayerPage : ContentPage
             _nvSkip.NextFocusLeftId  = _nvSeekFwd.Id;
         }
         UpdateSkipFocusLink();
+        WireScrubFocus();
         _focusChainWired = true;
 #endif
     }
@@ -390,8 +392,10 @@ public partial class PlayerPage : ContentPage
         StartMediaSession();
         OnPhoneAttached();
         // The entry reveal ran before the buttons had native views (focus fell
-        // to ‹ Back, the first focusable): focus play / pause now.
+        // to ‹ Back, the first focusable): focus play / pause now, and wire the
+        // focus links (+10 → the settings row, the seek bar) it couldn't yet.
         if (!Phone && Hud.IsVisible && !UpNextCard.IsVisible) Dispatcher.Dispatch(() => FocusRow(PlayPauseButton));
+        if (!Phone) Dispatcher.Dispatch(EnsureFocusChain);
         _ = LoadLevellingAsync();
         _ = StartAsync();
         _ = ResolveAdjacentAsync();
@@ -914,6 +918,7 @@ public partial class PlayerPage : ContentPage
         var p = Uri.EscapeDataString(path);
         var probeTask = _http.GetStringAsync($"/api/probe?path={p}");
         _ = LoadChaptersAsync(path);   // ticks + chapter steps, in parallel
+        _ = LoadTrickplayAsync(path);  // the TV seek bar's preview frames
         var extTask = _http.GetFromJsonAsync<List<ExternalTrackDto>>($"{ApiRoutes.ExternalTracks}?path={p}", Json);
         List<ProbeTrack> audio = new(), subs = new();
         bool ok = false;
@@ -1951,7 +1956,7 @@ public partial class PlayerPage : ContentPage
         double w = ChapterMarks.Width, dur = _durationMs / 1000.0;
         if (_chapters.Count < 2 || w <= 0 || dur <= 0) return;
         // The phone's Slider draws its track inside the SeekBar's padding.
-        double pad = 0, top = 1;
+        double pad = 0, top = Math.Max(0, (ScrubRow.Height - 12) / 2);
 #if ANDROID
         if (ScrubSlider.IsVisible && ScrubSlider.Handler?.PlatformView is Android.Widget.SeekBar sb
             && sb.Resources?.DisplayMetrics?.Density is float density && density > 0)
@@ -2239,9 +2244,11 @@ public partial class PlayerPage : ContentPage
         PhoneTick(st);
 
         if (dur > 0 && Math.Abs(dur - _ticksDurationMs) > 1000) { _ticksDurationMs = dur; Dispatcher.Dispatch(PaintChapterMarks); }
-        if (dur > 0 && _pendingSeekMs is null)
+        if (dur > 0 && _pendingSeekMs is null && _scrubTargetMs is null)
         {
-            SetScrubProgress(Math.Clamp((double)absPos / dur, 0, 1));
+            double frac = Math.Clamp((double)absPos / dur, 0, 1);
+            SetScrubProgress(frac);
+            if (_scrubFocused) PlaceThumb(frac);
             if (!_scrubbing) PositionLabel.Text = Fmt(absPos);
             DurationLabel.Text = Fmt(dur);
         }
@@ -3074,6 +3081,8 @@ public partial class PlayerPage : ContentPage
         _timer?.Stop();
         _hudTimer?.Stop();
         _seekTimer?.Stop();
+        _scrubTimer?.Stop();
+        ResetTrickplay();
 #if ANDROID
         _session?.Dispose();
         _session = null;
