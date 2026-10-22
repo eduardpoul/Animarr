@@ -65,6 +65,8 @@ ICONS = [
     ('AudioSync',    'offset',    'timer_24_regular',                 None),
     ('PictureInPicture', None,    'picture_in_picture_24_regular',    None),
     ('Dismiss',      'dismiss',   'dismiss_24_regular',               None),
+    ('OpenExternal', None,        'open_24_regular',                  None),
+    ('Globe',        None,        'globe_24_regular',                 None),
 ]
 
 FIRST_CODEPOINT = 0xE000          # Private Use Area

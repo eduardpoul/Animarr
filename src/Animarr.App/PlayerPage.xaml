@@ -5,6 +5,40 @@
              x:Class="Animarr.App.PlayerPage"
              x:Name="Root"
              BackgroundColor="Black">
+    <ContentPage.Resources>
+        <!-- HUD icons: Fluent UI System Icons from Resources/Fonts/fluent-icons.ttf
+             (the web player's set). The font's em box is the icon box, so a
+             FontSize N label is an N×N icon centred in its button. -->
+        <Style x:Key="HudIcon" TargetType="Label">
+            <Setter Property="FontFamily" Value="FluentIcons" />
+            <Setter Property="FontSize" Value="24" />
+            <Setter Property="TextColor" Value="White" />
+            <Setter Property="HorizontalOptions" Value="Center" />
+            <Setter Property="VerticalOptions" Value="Center" />
+        </Style>
+        <!-- ±10: the digits glyph over the arrow glyph, in the accent -->
+        <Style x:Key="HudIconDigits" TargetType="Label" BasedOn="{StaticResource HudIcon}">
+            <Setter Property="TextColor" Value="#f49157" />
+        </Style>
+        <!-- small status badge in a button's top-right corner (speed, quality) -->
+        <Style x:Key="HudBadge" TargetType="Border">
+            <Setter Property="IsVisible" Value="False" />
+            <Setter Property="HorizontalOptions" Value="End" />
+            <Setter Property="VerticalOptions" Value="Start" />
+            <Setter Property="Margin" Value="0,1,1,0" />
+            <Setter Property="Padding" Value="3,1" />
+            <Setter Property="StrokeThickness" Value="0" />
+            <Setter Property="StrokeShape" Value="RoundRectangle 4" />
+            <Setter Property="BackgroundColor" Value="#f49157" />
+            <Setter Property="InputTransparent" Value="True" />
+        </Style>
+        <Style x:Key="HudBadgeText" TargetType="Label">
+            <Setter Property="TextColor" Value="#0f1115" />
+            <Setter Property="FontFamily" Value="sans-serif-medium" />
+            <Setter Property="FontAttributes" Value="Bold" />
+            <Setter Property="FontSize" Value="10" />
+        </Style>
+    </ContentPage.Resources>
     <Grid x:Name="RootGrid">
         <!-- the ExoPlayer SurfaceView (index 0) and the SubtitleView (index 1)
              are inserted in code-behind -->
@@ -35,7 +69,7 @@
                     <Border.Behaviors>
                         <local:TvFocusBehavior x:Name="BackFocus" Radius="8" FillOnFocus="True" />
                     </Border.Behaviors>
-                    <Label Text="‹" TextColor="White" FontSize="24" HorizontalOptions="Center" VerticalOptions="Center" />
+                    <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Back}" FontSize="22" />
                 </Border>
                 <VerticalStackLayout x:Name="TitleBlock" HorizontalOptions="Center" VerticalOptions="Start" Margin="0,28,0,0" Spacing="2">
                     <Label x:Name="EyebrowLabel" Text="NOW PLAYING" TextColor="#f49157"
@@ -58,18 +92,17 @@
                 <Border x:Name="CenterPrevButton" WidthRequest="56" HeightRequest="56" StrokeThickness="0"
                         StrokeShape="RoundRectangle 28" BackgroundColor="#59000000" VerticalOptions="Center">
                     <Border.Behaviors><local:TvFocusBehavior x:Name="CenterPrevFocus" Radius="28" /></Border.Behaviors>
-                    <Label Text="⏮" TextColor="White" FontSize="20" HorizontalOptions="Center" VerticalOptions="Center" />
+                    <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Previous}" FontSize="26" />
                 </Border>
                 <Border x:Name="CenterPlayButton" WidthRequest="76" HeightRequest="76" StrokeThickness="0"
                         StrokeShape="RoundRectangle 38" BackgroundColor="#73000000" VerticalOptions="Center">
                     <Border.Behaviors><local:TvFocusBehavior x:Name="CenterPlayFocus" Radius="38" /></Border.Behaviors>
-                    <Label x:Name="CenterPlayIcon" Text="❚❚" TextColor="White" FontSize="28"
-                           HorizontalOptions="Center" VerticalOptions="Center" />
+                    <Label x:Name="CenterPlayIcon" Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Pause}" FontSize="36" />
                 </Border>
                 <Border x:Name="CenterNextButton" WidthRequest="56" HeightRequest="56" StrokeThickness="0"
                         StrokeShape="RoundRectangle 28" BackgroundColor="#59000000" VerticalOptions="Center">
                     <Border.Behaviors><local:TvFocusBehavior x:Name="CenterNextFocus" Radius="28" /></Border.Behaviors>
-                    <Label Text="⏭" TextColor="White" FontSize="20" HorizontalOptions="Center" VerticalOptions="Center" />
+                    <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Next}" FontSize="26" />
                 </Border>
             </HorizontalStackLayout>
 
@@ -104,37 +137,38 @@
                     <Grid ColumnDefinitions="*,Auto">
                         <!-- left: transport cluster -->
                         <HorizontalStackLayout Grid.Column="0" Spacing="8">
-                            <Border x:Name="SeekBackButton" WidthRequest="48" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="SeekBackButton" WidthRequest="48" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="SeekBackFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="-10" TextColor="White" FontFamily="sans-serif" FontSize="12"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Grid>
+                                    <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.SkipBack10Arrow}" />
+                                    <Label Style="{StaticResource HudIconDigits}" Text="{x:Static local:FluentGlyphs.SkipBack10Digits}" />
+                                </Grid>
                             </Border>
-                            <Border x:Name="PrevButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="PrevButton" WidthRequest="48" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="PrevFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="⏮" TextColor="White" FontSize="14"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Previous}" />
                             </Border>
-                            <Border x:Name="PlayPauseButton" WidthRequest="52" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="PlayPauseButton" WidthRequest="52" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="PlayPauseFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label x:Name="PlayPauseIcon" Text="❚❚" TextColor="White" FontSize="15"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Label x:Name="PlayPauseIcon" Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Pause}" FontSize="26" />
                             </Border>
-                            <Border x:Name="NextButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="NextButton" WidthRequest="48" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="NextFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="⏭" TextColor="White" FontSize="14"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Next}" />
                             </Border>
-                            <Border x:Name="SeekFwdButton" WidthRequest="48" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="SeekFwdButton" WidthRequest="48" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="SeekFwdFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="+10" TextColor="White" FontFamily="sans-serif" FontSize="12"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Grid>
+                                    <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.SkipForward10Arrow}" />
+                                    <Label Style="{StaticResource HudIconDigits}" Text="{x:Static local:FluentGlyphs.SkipForward10Digits}" />
+                                </Grid>
                             </Border>
-                            <Border x:Name="SkipButton" IsVisible="False" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="SkipButton" IsVisible="False" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="#E6bb5000" Padding="14,0" Margin="8,0,0,0">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="SkipFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
                                 <Label x:Name="SkipLabel" Text="Пропустить" TextColor="White" FontFamily="sans-serif"
@@ -145,63 +179,64 @@
                         <!-- right: settings cluster -->
                         <HorizontalStackLayout Grid.Column="1" Spacing="8">
                             <!-- playback speed 0.5–2× (remembered) -->
-                            <Border x:Name="SpeedButton" WidthRequest="52" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="SpeedButton" WidthRequest="52" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="SpeedFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label x:Name="SpeedLabel" Text="1×" TextColor="White" FontFamily="sans-serif" FontSize="12"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Grid>
+                                    <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Speed}" />
+                                    <!-- "1.5×"; hidden at normal speed -->
+                                    <Border x:Name="SpeedBadge" Style="{StaticResource HudBadge}">
+                                        <Label x:Name="SpeedLabel" Style="{StaticResource HudBadgeText}" />
+                                    </Border>
+                                </Grid>
                             </Border>
-                            <Border x:Name="VolumeButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="VolumeButton" WidthRequest="48" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="VolumeFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="VOL" TextColor="White" FontFamily="sans-serif" FontSize="11"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Label x:Name="VolumeIcon" Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Volume}" />
                             </Border>
-                            <Border x:Name="AudioButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="AudioButton" WidthRequest="48" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="AudioFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="AT" TextColor="White" FontFamily="sans-serif" FontSize="11"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.AudioTrack}" />
                             </Border>
-                            <Border x:Name="SubsButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="SubsButton" WidthRequest="48" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="SubsFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="CC" TextColor="White" FontFamily="sans-serif" FontSize="11"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Subtitles}" />
                             </Border>
-                            <Border x:Name="QualityButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="QualityButton" WidthRequest="56" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="QualityFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="HD" TextColor="White" FontFamily="sans-serif" FontSize="11"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Grid>
+                                    <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Quality}" />
+                                    <!-- the quality in force ("1080p", "4K"), amber when re-encoded -->
+                                    <Border x:Name="QualityBadge" Style="{StaticResource HudBadge}">
+                                        <Label x:Name="QualityBadgeLabel" Style="{StaticResource HudBadgeText}" />
+                                    </Border>
+                                </Grid>
                             </Border>
                             <!-- aspect ratio (fit / stretch / zoom / forced) -->
-                            <Border x:Name="AspectButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="AspectButton" WidthRequest="48" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="AspectFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="AR" TextColor="White" FontFamily="sans-serif" FontSize="11"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Picture}" />
                             </Border>
-                            <Border x:Name="InfoButton" WidthRequest="44" HeightRequest="36" StrokeThickness="0"
+                            <Border x:Name="InfoButton" WidthRequest="48" HeightRequest="40" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="InfoFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Label Text="ⓘ" TextColor="White" FontSize="15"
-                                       HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Info}" />
                             </Border>
                             <!-- phone: picture-in-picture + the settings sheet -->
                             <Border x:Name="PipButton" IsVisible="False" WidthRequest="52" HeightRequest="44" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="PipFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Path Data="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z"
-                                      Fill="White" Aspect="Uniform" WidthRequest="24" HeightRequest="24"
-                                      HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.PictureInPicture}" />
                             </Border>
                             <Border x:Name="GearButton" IsVisible="False" WidthRequest="52" HeightRequest="44" StrokeThickness="0"
                                     StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="GearFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                                <Path Data="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"
-                                      Fill="White" Aspect="Uniform" WidthRequest="24" HeightRequest="24"
-                                      HorizontalOptions="Center" VerticalOptions="Center" />
+                                <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Settings}" />
                             </Border>
                         </HorizontalStackLayout>
                     </Grid>
@@ -240,8 +275,11 @@
                     <Border x:Name="UpNextPlayButton" HeightRequest="36" Padding="14,0" StrokeThickness="0"
                             StrokeShape="RoundRectangle 8" BackgroundColor="#E6bb5000">
                         <Border.Behaviors><local:TvFocusBehavior x:Name="UpNextPlayFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
-                        <Label x:Name="UpNextPlayLabel" Text="▶  Смотреть" TextColor="White" FontFamily="sans-serif"
-                               FontSize="13" HorizontalOptions="Center" VerticalOptions="Center" />
+                        <HorizontalStackLayout Spacing="8" HorizontalOptions="Center" VerticalOptions="Center">
+                            <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Play}" FontSize="16" />
+                            <Label x:Name="UpNextPlayLabel" Text="Смотреть" TextColor="White" FontFamily="sans-serif"
+                                   FontSize="13" VerticalOptions="Center" />
+                        </HorizontalStackLayout>
                     </Border>
                     <Border x:Name="UpNextSkipButton" IsVisible="False" HeightRequest="36" Padding="14,0" StrokeThickness="0"
                             StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
@@ -281,8 +319,8 @@
                                 <local:TvFocusBehavior x:Name="VolumeSliderFocus" Radius="8" FillOnFocus="True" />
                             </Border.Behaviors>
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
-                                <Label Grid.Column="0" Text="VOL" TextColor="#b3b3b3"
-                                       FontFamily="sans-serif" FontSize="12" VerticalOptions="Center" />
+                                <Label Grid.Column="0" x:Name="VolumeSheetIcon" Style="{StaticResource HudIcon}"
+                                       Text="{x:Static local:FluentGlyphs.Volume}" TextColor="#b3b3b3" />
                                 <ProgressBar Grid.Column="1" x:Name="VolumeBar" Progress="1"
                                              ProgressColor="#bb5000" VerticalOptions="Center" />
                                 <Label Grid.Column="2" x:Name="VolumeValue" Text="100%" TextColor="White"

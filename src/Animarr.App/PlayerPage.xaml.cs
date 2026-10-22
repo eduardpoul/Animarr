@@ -145,7 +145,7 @@ public partial class PlayerPage : ContentPage
         SpeedFocus.Command     = new Command(OpenSpeedSheet);
         SetUpPhone();
         _speed = TvPlaybackPrefs.Speed;
-        SpeedLabel.Text = SpeedText(_speed);
+        UpdateSpeedBadge();
 
         // Re-apply the remembered aspect mode ("default" = fit / letterbox).
         _aspect = Preferences.Default.Get("player_aspect", "default");
@@ -775,6 +775,7 @@ public partial class PlayerPage : ContentPage
         _candidates = b.Candidates;
         _maxHeight = maxHeight;
         _kind = directPlay ? StreamKind.DirectPlay : directStream ? StreamKind.DirectStream : StreamKind.Hls;
+        UpdateQualityBadge();
         _renditions = _kind == StreamKind.Hls && b.AudioRenditions is { Count: > 0 } rl ? rl : null;
         _renditionSwitch = null;
         if (_renditions is { } rs)
@@ -1886,6 +1887,7 @@ public partial class PlayerPage : ContentPage
         // skip segments (they're re-fetched for the new episode).
         _maxHeight = 0; _sourceHeight = 0; _streamBaseMs = 0; _knownDurationMs = 0;
         _isDirectStream = false; _forceTranscode = false; _capFallback = false;   // per-file decisions
+        UpdateQualityBadge();
         _recoveringSinceUtc = null;
         _pendingSeekMs = null; _seekTimer?.Stop();   // a seek pressed on the old episode
         // Tracks are per file. A remembered title: the server's memory (PUT on
@@ -2071,8 +2073,8 @@ public partial class PlayerPage : ContentPage
         if (armed)
         {
             UpNextPlayLabel.Text = _upNextRemainingSec <= UpNextCountdownSec
-                ? $"▶  Смотреть · {Math.Max(0, (int)Math.Ceiling(_upNextRemainingSec))}"
-                : "▶  Смотреть";
+                ? $"Смотреть · {Math.Max(0, (int)Math.Ceiling(_upNextRemainingSec))}"
+                : "Смотреть";
             UpNextSkipButton.IsVisible = !_creditsSkipUsed && _creditsEnd is double ce
                                          && durSec - ce > 5 && posSec < ce;
         }
@@ -2492,7 +2494,10 @@ public partial class PlayerPage : ContentPage
 
     /// <param name="KeepOpen">OK applies the row and rebuilds the sheet in
     /// place (focus stays on the row) — steppers like the subtitle offset.</param>
-    private sealed record SheetRow(string Label, bool Selected, Action? OnSelect, bool KeepOpen = false);
+    /// <param name="Icon">A <see cref="FluentGlyphs"/> glyph leading the row
+    /// (menu rows: the ⚙ sheet); option rows keep the ● marker instead.</param>
+    private sealed record SheetRow(string Label, bool Selected, Action? OnSelect, bool KeepOpen = false,
+                                   string? Icon = null);
 
     /// <summary>Rebuilds the open list sheet with focus on row N (set by
     /// sheets that have KeepOpen rows).</summary>
@@ -2531,6 +2536,9 @@ public partial class PlayerPage : ContentPage
     {
         VolumeBar.Progress = _volume;
         VolumeValue.Text = _volume <= 0.001f ? "Выкл" : $"{(int)Math.Round(_volume * 100)}%";
+        // The speaker shows the level: muted / low / high.
+        VolumeIcon.Text = VolumeSheetIcon.Text = _volume <= 0.001f ? FluentGlyphs.Mute
+                                               : _volume < 0.5f ? FluentGlyphs.VolumeLow : FluentGlyphs.Volume;
     }
 
     // Track lists -------------------------------------------------------------
@@ -2734,6 +2742,18 @@ public partial class PlayerPage : ContentPage
         OpenListSheet("КАЧЕСТВО", rows, QualityButton);
     }
 
+    /// <summary>The quality button's badge: the cap in force, else the height
+    /// the server sends ("4K" from 2160 up); amber when the video is re-encoded
+    /// (the web player's badge).</summary>
+    private void UpdateQualityBadge()
+    {
+        int h = _maxHeight > 0 ? _maxHeight : _sourceHeight;
+        QualityBadgeLabel.Text = h <= 0 ? "" : _maxHeight == 0 && h >= 2160 ? "4K" : $"{h}p";
+        QualityBadge.IsVisible = h > 0;
+        QualityBadge.BackgroundColor = Color.FromArgb(
+            _outputPlan?.EndsWith("-reencode", StringComparison.Ordinal) == true ? "#fcb442" : "#f49157");
+    }
+
     private void ApplyQuality(int maxHeight)
     {
         if (maxHeight == _maxHeight) { FlashInfo("Уже выбрано"); return; }
@@ -2776,7 +2796,7 @@ public partial class PlayerPage : ContentPage
     {
         var label = new Label
         {
-            Text = (r.Selected ? "●  " : "      ") + r.Label,
+            Text = r.Icon is not null ? r.Label : (r.Selected ? "●  " : "      ") + r.Label,
             TextColor = r.Selected ? Color.FromArgb("#f49157") : Colors.White,
             FontFamily = "sans-serif",
             FontSize = 15,
@@ -2784,13 +2804,26 @@ public partial class PlayerPage : ContentPage
             LineBreakMode = LineBreakMode.TailTruncation,
             VerticalOptions = LayoutOptions.Center,
         };
+        View content = label;
+        if (r.Icon is not null)
+        {
+            // A star column keeps the text width-bound (tail truncation).
+            var grid = new Grid { ColumnSpacing = 14, ColumnDefinitions = { new(GridLength.Auto), new(GridLength.Star) } };
+            grid.Add(new Label
+            {
+                Text = r.Icon, FontFamily = FluentGlyphs.FontFamily, FontSize = 20,
+                TextColor = Color.FromArgb("#c8c8c8"), VerticalOptions = LayoutOptions.Center,
+            }, 0);
+            grid.Add(label, 1);
+            content = grid;
+        }
         var border = new Border
         {
             BackgroundColor = Colors.Transparent,
             StrokeThickness = 0,
             Padding = new Thickness(16, 10),
             StrokeShape = new RoundRectangle { CornerRadius = 8 },
-            Content = label,
+            Content = content,
         };
         var beh = new TvFocusBehavior { Radius = 8, FillOnFocus = true };
         beh.Command = new Command(() =>
@@ -2898,6 +2931,13 @@ public partial class PlayerPage : ContentPage
     private static string SpeedText(float v) =>
         (Math.Abs(v - 1f) < 0.01f ? "1" : v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)) + "×";
 
+    /// <summary>The speed button's badge: "1.5×", none at normal speed.</summary>
+    private void UpdateSpeedBadge()
+    {
+        SpeedLabel.Text = SpeedText(_speed);
+        SpeedBadge.IsVisible = Math.Abs(_speed - 1f) > 0.01f;
+    }
+
     private void OpenSpeedSheet()
     {
         var rows = Speeds.Select(v => new SheetRow(Math.Abs(v - 1f) < 0.01f ? "1× (обычная)" : SpeedText(v),
@@ -2912,7 +2952,7 @@ public partial class PlayerPage : ContentPage
         _speed = v;
         TvPlaybackPrefs.Speed = v;
         _ = NativePlayerService.Instance?.SetSpeedAsync(v);
-        SpeedLabel.Text = SpeedText(v);
+        UpdateSpeedBadge();
         Log($"speed {v:0.##}");
         FlashInfo($"Скорость: {SpeedText(v)}");
     }

@@ -42,6 +42,9 @@ public static class MauiProgram
                 fonts.AddFont("hanken-grotesk-variable.ttf", "ArchivoBlack");
                 fonts.AddFont("hanken-grotesk-variable.ttf", "GeistMono");
                 fonts.AddFont("hanken-grotesk-variable.ttf", "Geist");
+                // The players' icons (Fluent UI System Icons subset, see
+                // FluentGlyphs / tools/icons/build_player_icons.py).
+                fonts.AddFont("fluent-icons.ttf", FluentGlyphs.FontFamily);
             });
 
         // BlazorWebView host plumbing.

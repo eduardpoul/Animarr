@@ -117,7 +117,7 @@ public partial class PlayerPage
 
     private void SetPlayIcon(bool playing)
     {
-        var icon = playing ? "❚❚" : "▶";
+        var icon = playing ? FluentGlyphs.Pause : FluentGlyphs.Play;
         PlayPauseIcon.Text = icon;
         CenterPlayIcon.Text = icon;
     }
@@ -456,17 +456,17 @@ public partial class PlayerPage
         void Then(Action open) => Dispatcher.Dispatch(open);
         var rows = new List<SheetRow>
         {
-            new($"Аудио: {CurrentAudioName()}", false, () => Then(OpenAudioSheet)),
-            new($"Субтитры: {(_sub is { } s ? SubLabel(s) : "—")}", false, () => Then(OpenSubsSheet)),
-            new($"Качество: {(_maxHeight == 0 ? "оригинал" : $"{_maxHeight}p")}", false, () => Then(OpenQualitySheet)),
-            new($"Формат: {AspectName(_aspect)}", false, () => Then(OpenAspectSheet)),
-            new($"Скорость: {SpeedText(_speed)}", false, () => Then(OpenSpeedSheet)),
-            new("Сведения о потоке", false, () => Then(ShowInfo)),
-            new("Открыть во внешнем плеере…", false, () => Then(OpenExternalSheet)),
+            new($"Аудио: {CurrentAudioName()}", false, () => Then(OpenAudioSheet), Icon: FluentGlyphs.AudioTrack),
+            new($"Субтитры: {(_sub is { } s ? SubLabel(s) : "—")}", false, () => Then(OpenSubsSheet), Icon: FluentGlyphs.Subtitles),
+            new($"Качество: {(_maxHeight == 0 ? "оригинал" : $"{_maxHeight}p")}", false, () => Then(OpenQualitySheet), Icon: FluentGlyphs.Quality),
+            new($"Формат: {AspectName(_aspect)}", false, () => Then(OpenAspectSheet), Icon: FluentGlyphs.Picture),
+            new($"Скорость: {SpeedText(_speed)}", false, () => Then(OpenSpeedSheet), Icon: FluentGlyphs.Speed),
+            new("Сведения о потоке", false, () => Then(ShowInfo), Icon: FluentGlyphs.Info),
+            new("Открыть во внешнем плеере…", false, () => Then(OpenExternalSheet), Icon: FluentGlyphs.OpenExternal),
         };
         // The web player can take back the file it handed over.
         if (Outcome is not null && _filePath == _handOffPath)
-            rows.Add(new SheetRow("Смотреть в веб-плеере", false, () => _ = SwitchToWebPlayerAsync()));
+            rows.Add(new SheetRow("Смотреть в веб-плеере", false, () => _ = SwitchToWebPlayerAsync(), Icon: FluentGlyphs.Globe));
         OpenListSheet("НАСТРОЙКИ", rows, GearButton, focusIndex: 0);
     }
 
