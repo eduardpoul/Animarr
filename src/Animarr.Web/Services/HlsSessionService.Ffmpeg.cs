@@ -39,7 +39,9 @@ public sealed partial class HlsSessionService
         HdrToneMapper toneMapper = HdrToneMapper.None,
         // What to do with the mapped audio (AudioPolicy; chosen once per
         // session). null = the historical AAC stereo transcode.
-        AudioDecision? audio = null)
+        AudioDecision? audio = null,
+        // Dolby Vision treatment of the fMP4 copy (DolbyVision.For).
+        DoviHandling dovi = DoviHandling.None)
     {
         var args = new List<string>();
         var audioArgs = (audio ?? new AudioDecision(false, "aac", 2, "192k")).Args().ToArray();
@@ -83,7 +85,7 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4StreamCopy:
                 BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
-                    externalAudioPath, videoMap, audioArgs);
+                    externalAudioPath, videoMap, audioArgs, dovi);
                 break;
             case HlsPlan.Fmp4SoftwareReencode:
                 BuildFmp4SoftwareArgs(args, fullPath, seekSec, audioOffsetSec, startNumber,
@@ -622,7 +624,8 @@ public sealed partial class HlsSessionService
     /// has to rely on DLNA cast / mpv to avoid the wobble.</summary>
     private static void BuildFmp4StreamCopyArgs(List<string> args, string fullPath, double seekSec,
         int startNumber, string? videoCodec, double audioOffsetSec, int audioTrackIndex,
-        string? externalAudioPath = null, string videoMap = "0:V:0?", string[]? audioArgs = null)
+        string? externalAudioPath = null, string videoMap = "0:V:0?", string[]? audioArgs = null,
+        DoviHandling dovi = DoviHandling.None)
     {
         // A second input is needed either to shift the source's own audio
         // (-itsoffset) OR to pull audio from an external dub file. The external
@@ -663,10 +666,9 @@ public sealed partial class HlsSessionService
             "-c:v", "copy",
         });
         args.AddRange(audioArgs ?? DefaultAudioArgs);
-        if (string.Equals(videoCodec, "hevc", StringComparison.OrdinalIgnoreCase))
-        {
-            args.Add("-tag:v"); args.Add("hvc1");
-        }
+        // hvc1 tag for HEVC (Chrome / Edge refuse hev1 in fMP4), plus the Dolby
+        // Vision treatment: dvh1 + dvcC for a DV client, the RPU strip for P7.
+        args.AddRange(DolbyVision.CopyVideoArgs(dovi, videoCodec));
     }
 
 }

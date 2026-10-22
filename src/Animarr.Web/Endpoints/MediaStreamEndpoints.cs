@@ -135,12 +135,18 @@ internal static class MediaStreamEndpoints
         // Inspect the video codec once so we can apply codec-specific fixes:
         //  • HEVC needs `-tag:v hvc1` — Chrome/Edge refuse the default `hev1` tag
         //    in fragmented MP4. Same bytes, different fourcc, plays fine.
-        //  • DolbyVision-flagged HEVC (profile 8.1 = HDR10-compatible) carries a
-        //    DOVI configuration box that browsers can't parse. Strip it via the
-        //    hevc_metadata bitstream filter so the player sees plain HDR10.
+        //  • Dolby Vision (DolbyVision.For): P8 goes out as plain hvc1 — no
+        //    dvcC box (ffmpeg writes it only with -strict unofficial), so the
+        //    player sees HDR10; P7 gets its RPU stripped (dovi_rpu); a DV
+        //    client (`dv` token) gets dvh1 + dvcC.
         // Cached per file (MediaProbeCache) — every ?seek= reload lands here,
         // and the playback start already probed the same file.
-        var (videoCodec, hasDolbyVision, videoMap) = await PeekVideoCodecAsync(probeCache, fullPath!, http.RequestAborted);
+        var (videoCodec, dovi, videoMap) = await PeekVideoCodecAsync(probeCache, fullPath!, http.RequestAborted);
+        var client = ClientCaps.Parse(nativeCaps, maxAudioChannels);
+        var doviHandling = DolbyVision.For(dovi, client);
+        // A remux can't re-encode P5 — /api/hls/start never offers it here for a
+        // non-DV client; a direct caller gets the base layer as before.
+        if (doviHandling == DoviHandling.Reencode) doviHandling = DoviHandling.AsBaseLayer;
         if (http.RequestAborted.IsCancellationRequested) return Results.Empty;   // seeked away mid-probe
 
         // Audio: the requested track, copied when the client decodes it and MP4
@@ -156,8 +162,7 @@ internal static class MediaStreamEndpoints
             return Results.Problem(detail: $"audioTrackIndex {trackIndex} is out of range ({track.Count} audio tracks).",
                 statusCode: StatusCodes.Status400BadRequest, title: "Invalid playback request",
                 extensions: new Dictionary<string, object?> { ["code"] = "invalid_audio_track" });
-        var audio = AudioPolicy.Decide(track.Codec, track.Channels, track.Profile,
-            ClientCaps.Parse(nativeCaps, maxAudioChannels), AudioOutput.Mp4Remux);
+        var audio = AudioPolicy.Decide(track.Codec, track.Channels, track.Profile, client, AudioOutput.Mp4Remux);
 
         args.AddRange(new[] { "-hide_banner", "-loglevel", "warning" });
         // AVI carries no pts for B-frames (XviD/DivX): stream-copied into fMP4
@@ -186,20 +191,12 @@ internal static class MediaStreamEndpoints
             "-c:v", "copy",              // video stream-copy
         });
         args.AddRange(audio.Args());
-        if (string.Equals(videoCodec, "hevc", StringComparison.OrdinalIgnoreCase))
-        {
-            // Critical for Chrome/Edge: refuse the default `hev1` fourcc in fMP4.
-            args.Add("-tag:v"); args.Add("hvc1");
-        }
+        // hvc1 for HEVC (Chrome/Edge refuse the default `hev1` fourcc in fMP4)
+        // + the Dolby Vision treatment above.
+        args.AddRange(DolbyVision.CopyVideoArgs(doviHandling, videoCodec));
         args.AddRange(new[]
         {
             "-f", "mp4",
-            // Note on DolbyVision: profile 8.1 files are HDR10-backward-compatible
-            // at the HEVC layer, so most browsers can play the stream as-is once
-            // the codec tag is hvc1. We do NOT strip the DV RPU here because
-            // `hevc_metadata=remove_dovi=1` requires ffmpeg >= 7.1, while the
-            // Debian-bundled build is 5.1. If DV-flagged playback breaks again
-            // we'll bring our own ffmpeg or transcode.
             // delay_moov: required because AC3 audio packets don't expose their
             // codec frame size until the first frame is muxed; without this flag
             // ffmpeg refuses to emit the (empty) moov and the response is 0 bytes.
@@ -504,41 +501,34 @@ internal static class MediaStreamEndpoints
         return string.Join(" | ", lines.Skip(Math.Max(0, lines.Length - count)));
     }
 
-    /// <summary>First video stream's codec + Dolby-Vision presence so /api/video
-    /// can branch on them. Returns ("hevc", true) for HDR10-compatible DV
-    /// profile 8 files. Read from the cached <c>-show_streams</c> JSON (the
-    /// first <c>codec_type=video</c> stream that isn't cover art = ffmpeg's
-    /// <c>V:0</c>, the stream the remux maps) instead of a dedicated ffprobe per
-    /// request.</summary>
-    private static async Task<(string? codec, bool hasDolbyVision, string videoMap)> PeekVideoCodecAsync(
+    /// <summary>The main video stream's codec + Dolby Vision profile so
+    /// /api/video can branch on them. Read from the cached <c>-show_streams</c>
+    /// JSON (the first <c>codec_type=video</c> stream that isn't cover art =
+    /// ffmpeg's <c>V:0</c>, the stream the remux maps) instead of a dedicated
+    /// ffprobe per request.</summary>
+    private static async Task<(string? codec, DoviInfo dovi, string videoMap)> PeekVideoCodecAsync(
         MediaProbeCache probeCache, string fullPath, CancellationToken ct)
     {
         try
         {
             var json = await probeCache.GetStreamsJsonAsync(fullPath, ct);
-            if (json is null) return (null, false, DefaultVideoMap);
+            if (json is null) return (null, DoviInfo.None, DefaultVideoMap);
 
             using var doc = System.Text.Json.JsonDocument.Parse(json);
-            if (!doc.RootElement.TryGetProperty("streams", out var streams)) return (null, false, DefaultVideoMap);
+            if (!doc.RootElement.TryGetProperty("streams", out var streams)) return (null, DoviInfo.None, DefaultVideoMap);
             // Same pick as the HLS probe: never a cover picture in front of the video.
             var pos = HlsSessionService.PickMainVideo(streams);
-            if (pos < 0) return (null, false, DefaultVideoMap);
+            if (pos < 0) return (null, DoviInfo.None, DefaultVideoMap);
             var s = streams[pos];
             var codec = s.TryGetProperty("codec_name", out var cn) ? cn.GetString() : null;
-            bool dv = false;
-            if (s.TryGetProperty("side_data_list", out var sd) && sd.ValueKind == System.Text.Json.JsonValueKind.Array)
-                foreach (var el in sd.EnumerateArray())
-                    if (el.TryGetProperty("side_data_type", out var sdt)
-                        && (sdt.GetString() ?? "").Contains("DOVI", StringComparison.OrdinalIgnoreCase))
-                        dv = true;
             var map = s.TryGetProperty("index", out var ix) && ix.TryGetInt32(out var index)
                 ? "0:" + index.ToString(System.Globalization.CultureInfo.InvariantCulture)
                 : DefaultVideoMap;
-            return (codec, dv, map);
+            return (codec, DoviInfo.FromStream(s), map);
         }
         catch
         {
-            return (null, false, DefaultVideoMap);
+            return (null, DoviInfo.None, DefaultVideoMap);
         }
     }
 

@@ -312,19 +312,38 @@ public sealed partial class HlsSessionService : IDisposable
         // plain /api/file for the TV.
         // Since task 1.2 the web player reports the same tokens (MediaCapabilities),
         // so this branch serves browsers that sent them too.
+        // Dolby Vision for this client (master plan §5.4, DolbyVision.For):
+        // P8.x plays as its HEVC base layer, P7 needs its RPU stripped, P5
+        // needs a DV decoder or a re-encode. Since the web player sends tokens
+        // too, this branch is also where a browser's P8 MKV must keep Direct
+        // Stream — the native <video> path (RTX VSR / RTX HDR need it) it had
+        // before the browser reported caps.
+        var dovi = DolbyVision.For(probe.Dovi, client);
         if (client.HasTokens)
         {
-            bool videoOk = NativeVideoOk(probe, client);
+            bool videoOk = NativeVideoOk(probe, client) && dovi != DoviHandling.Reencode;
             bool audioOk = probe.AudioStreams.Count == 0 || client.DecodesAudio(probe.AudioCodec);
             bool containerOk = client.Has(container);
+            // Direct Play hands over the raw file, DV signalling and all: fine
+            // for a DV decoder, and for P8 where the player falls back to the
+            // base layer itself — ExoPlayer does (dvhe.08 → HEVC); a browser
+            // only when the MP4 sample entry is plain hvc1/hev1 (a dvh1 / dvhe
+            // entry fails its codec check). Never for P7 (no fallback anywhere:
+            // it needs the strip, i.e. the remux).
+            bool rawOk = dovi switch
+            {
+                DoviHandling.None or DoviHandling.AsDolbyVision => true,
+                DoviHandling.AsBaseLayer => client.NativePlayer || !IsDolbyVisionSampleEntry(probe.VideoCodecTag),
+                _ => false,
+            };
 
-            if (audioTrackIndex == 0 && videoOk && audioOk && containerOk)
+            if (audioTrackIndex == 0 && videoOk && rawOk && audioOk && containerOk)
             {
                 var nativeUrl = "/api/file?path=" + Uri.EscapeDataString(fullPath);
-                var nativeOut = BuildOutputInfo(probe, plan: null, isDirectPlay: true);
+                var nativeOut = BuildOutputInfo(probe, plan: null, isDirectPlay: true, dovi: dovi);
                 return new PlaybackDecision(true, nativeUrl, duration, nativeOut);
             }
-            if (videoOk && !probe.HasDolbyVision && client.Has("mp4"))
+            if (videoOk && client.Has("mp4"))
             {
                 // Device decodes the video but not the audio (or can't demux the
                 // container, or wants another track) → /api/video: video
@@ -337,7 +356,8 @@ public sealed partial class HlsSessionService : IDisposable
         }
 
         bool clientHevc = client.Hevc, clientHevc10 = client.Hevc10;
-        if (audioTrackIndex == 0 && IsDirectPlayEligible(container, probe, clientHevc, clientHevc10))
+        if (audioTrackIndex == 0 && dovi == DoviHandling.None
+            && IsDirectPlayEligible(container, probe, clientHevc, clientHevc10))
         {
             // /api/file serves the raw bytes with Range support — exactly what
             // <video> needs for native seek. URL-escape the path so spaces and
@@ -347,7 +367,7 @@ public sealed partial class HlsSessionService : IDisposable
             return new PlaybackDecision(true, directUrl, duration, output);
         }
 
-        if (IsDirectStreamEligible(container, probe, clientHevc, clientHevc10))
+        if (dovi != DoviHandling.Reencode && IsDirectStreamEligible(container, probe, clientHevc, clientHevc10))
         {
             // /api/video remuxes the source to progressive fMP4 (video copy,
             // audio→AAC). The browser plays it as a native <video>, which is
@@ -374,9 +394,15 @@ public sealed partial class HlsSessionService : IDisposable
             + client.ToQuery();
         var audio = AudioPolicy.Decide(track.AudioCodec, track.AudioChannels, track.AudioProfile, client,
             AudioOutput.Mp4Remux);
-        var output = BuildOutputInfo(track, plan: null, isDirectPlay: false, isDirectStream: true, audio: audio);
+        var output = BuildOutputInfo(track, plan: null, isDirectPlay: false, isDirectStream: true, audio: audio,
+            dovi: DolbyVision.For(track.Dovi, client));
         return new PlaybackDecision(false, url, duration, output, DirectStream: true);
     }
+
+    /// <summary>An MP4 sample entry that announces Dolby Vision (dvh1 / dvhe /
+    /// dav1) rather than plain HEVC / AV1.</summary>
+    private static bool IsDolbyVisionSampleEntry(string? tag)
+        => (tag ?? "").ToLowerInvariant() is "dvh1" or "dvhe" or "dav1" or "dva1" or "dvav";
 
     /// <summary>Picks the HDR → SDR tone mapper for a re-encode of an HDR
     /// source (None for SDR sources and copy plans): libplacebo on the VAAPI
@@ -409,7 +435,8 @@ public sealed partial class HlsSessionService : IDisposable
     /// paths it reports the post-transcode codec/bit-depth/HDR state.
     /// </summary>
     private static PlayerOutputInfo BuildOutputInfo(ProbeInfo probe, HlsPlan? plan, bool isDirectPlay,
-        bool isDirectStream = false, HdrToneMapper toneMapper = HdrToneMapper.None, AudioDecision? audio = null)
+        bool isDirectStream = false, HdrToneMapper toneMapper = HdrToneMapper.None, AudioDecision? audio = null,
+        DoviHandling dovi = DoviHandling.None)
     {
         // Re-encode paths flatten to H.264 8-bit SDR. Everything else preserves
         // the source bitstream (Direct Play, TS copy, fMP4 stream-copy).
@@ -420,7 +447,9 @@ public sealed partial class HlsSessionService : IDisposable
         var hdrFormats = new List<string>();
         if (!isReencode)
         {
-            if (probe.HasDolbyVision) hdrFormats.Add("dolbyvision");
+            // Dolby Vision only where the player gets — and decodes — it; P8 as
+            // its base layer and stripped P7 play as the HDR10 / HLG below.
+            if (probe.HasDolbyVision && dovi == DoviHandling.AsDolbyVision) hdrFormats.Add("dolbyvision");
             var xfer = (probe.ColorTransfer ?? "").ToLowerInvariant();
             if (xfer == "smpte2084") hdrFormats.Add("hdr10");
             else if (xfer == "arib-std-b67") hdrFormats.Add("hlg");
@@ -485,14 +514,12 @@ public sealed partial class HlsSessionService : IDisposable
             TranscodeReason: reason);
     }
 
-    /// <summary>Video eligibility against the native client's capability tokens.
-    /// 10-bit HEVC needs the explicit <c>hevc10</c> token; Dolby Vision is never
-    /// offered natively (device DV handling is a minefield — HLS path knows how
-    /// to strip/serve it). 10-bit H.264 (High10) has no hardware decoders on
-    /// TV SoCs → transcode.</summary>
+    /// <summary>Codec eligibility against the client's capability tokens.
+    /// 10-bit HEVC needs the explicit <c>hevc10</c> token. 10-bit H.264
+    /// (High10) has no hardware decoders on TV SoCs → transcode.</summary>
     private static bool NativeVideoOk(ProbeInfo probe, ClientCaps caps)
     {
-        if (probe.HasDolbyVision) return false;
+        // (Dolby Vision is judged by the caller — DolbyVision.For.)
         var vc = (probe.VideoCodec ?? "").ToLowerInvariant();
         return vc switch
         {
@@ -544,11 +571,11 @@ public sealed partial class HlsSessionService : IDisposable
     /// Direct Stream eligibility — the file the browser can't open as a raw
     /// &lt;video src&gt; (non-MP4 container, e.g. MKV/AVI) but whose VIDEO codec
     /// it CAN decode. /api/video remuxes it to progressive fMP4 (video copy,
-    /// audio→AAC), so the only gate is the video codec/bit-depth vs the client's
-    /// reported HEVC support. Audio codec is irrelevant (always transcoded),
-    /// which makes this wider than Direct Play. Dolby Vision is allowed here
-    /// (unlike Direct Play): the remux tags HEVC as hvc1 and DV profile 8.1
-    /// plays as HDR10 — exactly the "keep the HDR" case we want native.
+    /// audio copied or transcoded), so the only gate is the video codec /
+    /// bit-depth vs the client's reported HEVC support, which makes this wider
+    /// than Direct Play. Dolby Vision is allowed here (unlike Direct Play) where
+    /// the remux can make it plain HEVC — P8 tagged hvc1 plays as HDR10, P7 gets
+    /// its RPU stripped; P5 is ruled out by the caller (it needs a re-encode).
     /// </summary>
     private static bool IsDirectStreamEligible(string container, ProbeInfo probe,
         bool clientHevc, bool clientHevc10)
@@ -719,7 +746,12 @@ public sealed partial class HlsSessionService : IDisposable
         // source height. 0 = native resolution (no scaling).
         var targetHeight = (maxHeight > 0 && (probe?.Height ?? 0) > 0 && maxHeight < probe!.Height)
             ? maxHeight : 0;
-        var plan = probe is not null ? ChoosePlan(probe, maxHeight, clientHevc, maxBitrate) : HlsPlan.Fmp4StreamCopy;
+        var plan = probe is not null ? ChoosePlan(probe, caps, maxHeight, maxBitrate) : HlsPlan.Fmp4StreamCopy;
+        // Dolby Vision on the fMP4 copy: dvh1 for a DV client, hvc1 base layer
+        // for P8, RPU strip for P7 (ChoosePlan never copies P5 for a non-DV
+        // client). Irrelevant to re-encodes — they decode the base layer.
+        var dovi = probe is not null && plan == HlsPlan.Fmp4StreamCopy
+            ? DolbyVision.For(probe.Dovi, caps) : DoviHandling.None;
         // The audio half (AudioPolicy): copy the mapped track when the client
         // decodes it and the plan's container (TS / fMP4) carries it, else
         // transcode — 5.1 for a 5.1-capable client, else a stereo downmix. An
@@ -758,7 +790,8 @@ public sealed partial class HlsSessionService : IDisposable
         }
         else if (probe is not null && plan == HlsPlan.Fmp4StreamCopy && probe.VideoCodecsAttribute is { } vAttr)
         {
-            probeForPlaylist = probe with { CodecsAttribute = $"{vAttr},{audio.CodecsTag}" };
+            var videoTag = dovi == DoviHandling.AsDolbyVision ? DolbyVision.CodecsTag(probe.Dovi) : vAttr;
+            probeForPlaylist = probe with { CodecsAttribute = $"{videoTag},{audio.CodecsTag}" };
         }
         // Segment layout + where the first ffmpeg run starts (B18). The player
         // places the first fragment it loads at that fragment's ANNOUNCED start,
@@ -885,16 +918,17 @@ public sealed partial class HlsSessionService : IDisposable
         // seg-{startSegment}.{ext} so the on-disk layout matches the playlist
         // we wrote. PTS handling depends on the plan (see BuildFfmpegArgs).
         var toneMapper = ToneMapperFor(plan, probe);
-        _logger.LogInformation("HLS {Token}: plan={Plan} audio={Audio} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H}) tonemap={ToneMap} client={Client} {Owner}",
+        _logger.LogInformation("HLS {Token}: plan={Plan} audio={Audio} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H} dv={Dv}/{DvHandling}) tonemap={ToneMap} client={Client} {Owner}",
             token, plan, audio, (int)Math.Round(audioOffsetSec * 1000),
-            probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, toneMapper, caps, who);
+            probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, probe?.Dovi, dovi, toneMapper, caps, who);
         // ffmpeg starts at the segment start computed above (ffmpegSeekSec), not
         // at the resume point — the playlist's EXT-X-START still says seekSec.
         var args = BuildFfmpegArgs(fullPath, ffmpegSeekSec, dir, ffmpegMediaPath, ffmpegMasterName,
             probe, plan, startNumber: startSegment, reuseInit: false,
             targetHeight: targetHeight,
             audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex,
-            externalAudioPath: externalAudioPath, maxBitrate: maxBitrate, toneMapper: toneMapper, audio: audio);
+            externalAudioPath: externalAudioPath, maxBitrate: maxBitrate, toneMapper: toneMapper, audio: audio,
+            dovi: dovi);
         // Stderr drain (Warning-level log) + the tail an early exit is explained with.
         var stderrTail = new StderrTail();
         Process proc;
@@ -915,6 +949,7 @@ public sealed partial class HlsSessionService : IDisposable
             VideoStreamIndex = probe?.VideoStreamIndex ?? -1,
             Probe = probe,
             Audio = audio,
+            Dovi = dovi,
         };
         _sessions[token] = session;
         // The caller gave up on this start (rapid Next/Prev, player closed
@@ -1038,7 +1073,7 @@ public sealed partial class HlsSessionService : IDisposable
         // resolution (it carries the scaled Width/Height), not the source.
         var output = probe is not null
             ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false, toneMapper: toneMapper,
-                audio: audio)
+                audio: audio, dovi: dovi)
             : new PlayerOutputInfo(
                 Plan:            "unknown",
                 Container:       plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
@@ -1247,7 +1282,8 @@ public sealed partial class HlsSessionService : IDisposable
                 externalAudioPath: session.ExternalAudioPath,
                 maxBitrate: session.MaxBitrate,
                 toneMapper: session.ToneMapper,
-                audio: session.Audio);
+                audio: session.Audio,
+                dovi: session.Dovi);
 
             // Same launcher as StartAsync (stderr drained + logged per line).
             Process proc;

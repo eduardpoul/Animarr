@@ -38,6 +38,8 @@ public sealed partial class HlsSessionService
             string? aCodec = null;
             int width = 1280, height = 720;
             bool hasDv = false;
+            var dovi = DoviInfo.None;
+            string? videoTag = null;      // MP4 sample entry (hvc1 / hev1 / dvh1 / dvhe …)
             bool is10Bit = false;
             string? colorTransfer = null;   // smpte2084 → HDR10, arib-std-b67 → HLG
             int audioChannels = 0;
@@ -89,13 +91,11 @@ public sealed partial class HlsSessionService
                             if (prof.Contains("Main 10", StringComparison.OrdinalIgnoreCase))
                                 is10Bit = true;
                         }
-                        if (s.TryGetProperty("side_data_list", out var sd))
-                        {
-                            foreach (var sdEl in sd.EnumerateArray())
-                                if (sdEl.TryGetProperty("side_data_type", out var sdt)
-                                    && (sdt.GetString() ?? "").Contains("DOVI", StringComparison.OrdinalIgnoreCase))
-                                    hasDv = true;
-                        }
+                        // Dolby Vision profile / compatibility (DoviInfo) — the
+                        // copy paths treat P5, P7 and P8 differently.
+                        dovi = DoviInfo.FromStream(s);
+                        hasDv = dovi.Present;
+                        videoTag = s.TryGetProperty("codec_tag_string", out var tagEl) ? tagEl.GetString() : null;
                         // B-frame reorder delay → default audio itsoffset for the
                         // fMP4 stream-copy path. has_b_frames is the decoder's
                         // reorder depth; × frame duration = how far video
@@ -177,6 +177,8 @@ public sealed partial class HlsSessionService
                 VideoBitRate     = videoBitRate,
                 AudioProfile     = audioProfile,
                 VideoCodecsAttribute = videoCodecsAttr,
+                Dovi             = dovi,
+                VideoCodecTag    = videoTag,
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

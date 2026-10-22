@@ -42,6 +42,14 @@ public sealed partial class HlsSessionService
         /// </summary>
         public double VideoEndSec { get; init; }
 
+        /// <summary>Dolby Vision profile / level / compatibility (None when
+        /// <see cref="HasDolbyVision"/> is false).</summary>
+        public DoviInfo Dovi { get; init; } = DoviInfo.None;
+
+        /// <summary>ffprobe codec_tag_string of the video (MP4 sample entry:
+        /// hvc1 / hev1 / dvh1 / dvhe; "[0][0][0][0]" for Matroska).</summary>
+        public string? VideoCodecTag { get; init; }
+
         /// <summary>ffprobe profile of the mapped audio track ("DTS-HD MA",
         /// "LC" …) — AudioPolicy picks the DTS core extract from it.</summary>
         public string? AudioProfile { get; init; }
@@ -211,8 +219,9 @@ public sealed partial class HlsSessionService
     ///     compatibility, HDR tone-mapped to SDR; otherwise stream-copy (best
     ///     effort — needs a HEVC client or cast).
     /// clientHevc = MediaSource.isTypeSupported('…hvc1…') on the client.</summary>
-    private HlsPlan ChoosePlan(ProbeInfo probe, int maxHeight = 0, bool clientHevc = false, int maxBitrate = 0)
+    private HlsPlan ChoosePlan(ProbeInfo probe, ClientCaps client, int maxHeight = 0, int maxBitrate = 0)
     {
+        bool clientHevc = client.Hevc;
         // Quality-ladder downscale: the user picked a resolution below the
         // source. Downscaling REQUIRES a re-encode (a stream-copy can't be
         // shrunk), so pick the best available encoder regardless of source
@@ -239,11 +248,16 @@ public sealed partial class HlsSessionService
 
         if (string.Equals(probe.VideoCodec, "hevc", StringComparison.OrdinalIgnoreCase))
         {
+            // Dolby Vision P5 has no base layer a plain HEVC decoder shows
+            // right (green / purple): for a client without DV decoding it is
+            // never copied — it re-encodes below, tone-mapped (DolbyVision.For).
+            bool mustReencode = DolbyVision.For(probe.Dovi, client) == DoviHandling.Reencode;
+
             // Browser decodes HEVC → ship the original bitstream untouched
             // (Direct Stream). No re-encode, no quality loss, fast start —
             // 8-bit and 10-bit/HDR alike. This is the path that makes Animarr
             // match a native client's quality instead of re-encoding to H.264.
-            if (clientHevc)
+            if (clientHevc && !mustReencode)
                 return HlsPlan.Fmp4StreamCopy;
 
             // Browser can't decode HEVC → re-encode to H.264 for compatibility
@@ -256,7 +270,9 @@ public sealed partial class HlsSessionService
             if (_hardware?.Current.Vaapi.Available == true
                 && (!probe.Is10Bit || _hardware.Current.VaapiHevc10Decode))
                 return HlsPlan.Fmp4VaapiReencode;
-            return HlsPlan.Fmp4StreamCopy;   // HEVC: let the browser decode the bitstream
+            // HEVC: let the browser decode the bitstream — except DV P5, which
+            // only a CPU re-encode can show correctly here.
+            return mustReencode ? HlsPlan.Fmp4SoftwareReencode : HlsPlan.Fmp4StreamCopy;
         }
 
         // Anything else — mpeg4/XviD (AVI), MPEG-2, VC-1, MPEG-1, … — the browser
