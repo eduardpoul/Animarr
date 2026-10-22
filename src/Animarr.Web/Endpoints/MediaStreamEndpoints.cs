@@ -328,16 +328,17 @@ internal static class MediaStreamEndpoints
         var fileName     = Path.GetFileNameWithoutExtension(fullPath!);
         var safeFileName = string.Concat(fileName.Where(c => !char.IsControl(c) && c != '"'));
         // Build absolute stream URL — players opening the .m3u won't know our
-        // server's hostname otherwise. Use plain HTTP on the raw 8080 port so
-        // Caddy's self-signed cert doesn't trip up non-browser TLS stacks.
+        // server's address otherwise. It is the address this request came in
+        // on — scheme, host, port and path base, X-Forwarded-Proto / Host
+        // already applied by UseForwardedHeaders for trusted proxies
+        // (ANIMARR_TRUSTED_PROXIES) — not a hard-coded http://host:8080, which
+        // was wrong behind any reverse proxy, a remapped port or a path prefix.
         // The player has no cookie, so the URL carries a link token signed for
         // THIS file and THIS user (the mpv tracker forwards it with its progress
         // pings, which then land in this user's watch state).
-        var scheme = "http";
-        var host   = http.Request.Host.Host;
-        var port   = "8080";
+        var origin = $"{http.Request.Scheme}://{http.Request.Host}{http.Request.PathBase}";
         var streamUrl = MediaTokenService.AppendToUrl(
-            $"{scheme}://{host}:{port}/api/file?path={Uri.EscapeDataString(fullPath!)}",
+            $"{origin}/api/file?path={Uri.EscapeDataString(fullPath!)}",
             tokens.IssueLink(uid, fullPath!, ExternalLinkLifetime));
 
         var m3u =
@@ -445,8 +446,11 @@ internal static class MediaStreamEndpoints
                 logger.LogWarning("Subtitle extract failed for {Path} track {Track} (exit {Code}): {Err}",
                     fullPath, track, r.ExitCode, LastLines(r.Error, 5));
                 http.Response.Headers.CacheControl = "no-store";
-                return Results.Problem("This subtitle track can't be converted to text.",
-                    statusCode: StatusCodes.Status422UnprocessableEntity);
+                // `code` tells a client why: image_subtitle (a bitmap track —
+                // fetch it as .sup / burn it in) or convert_failed.
+                return Results.Problem(detail: "This subtitle track can't be converted to text.",
+                    statusCode: StatusCodes.Status422UnprocessableEntity,
+                    extensions: new Dictionary<string, object?> { ["code"] = r.FailureCode ?? SubtitleCache.ConvertFailed });
             }
             if (r.Charset is not null)
                 logger.LogInformation("Subtitle {Path} track {Track}: converted from {Charset} to UTF-8",
