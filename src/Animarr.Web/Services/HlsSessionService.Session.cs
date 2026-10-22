@@ -35,6 +35,8 @@ public sealed partial class HlsSessionService
         /// <summary>Dolby Vision treatment of the fMP4 copy (tag / RPU strip),
         /// kept for the restart like the audio decision.</summary>
         public DoviHandling Dovi { get; init; }
+        /// <summary>The re-encode's output format (H.264 / HEVC Main10).</summary>
+        public VideoTarget Target { get; init; }
         public string? VideoCodec { get; }
         // Codec of the MAPPED audio track (ProbeInfo.ForAudioTrack) from the
         // start probe — the seek-restart has no probe and needs it for the TS

@@ -436,7 +436,7 @@ public sealed partial class HlsSessionService : IDisposable
     /// </summary>
     private static PlayerOutputInfo BuildOutputInfo(ProbeInfo probe, HlsPlan? plan, bool isDirectPlay,
         bool isDirectStream = false, HdrToneMapper toneMapper = HdrToneMapper.None, AudioDecision? audio = null,
-        DoviHandling dovi = DoviHandling.None)
+        DoviHandling dovi = DoviHandling.None, VideoTarget target = VideoTarget.H264)
     {
         // Re-encode paths flatten to H.264 8-bit SDR. Everything else preserves
         // the source bitstream (Direct Play, TS copy, fMP4 stream-copy).
@@ -456,8 +456,9 @@ public sealed partial class HlsSessionService : IDisposable
         }
         var hdr = hdrFormats.Count > 0 ? hdrFormats[0] : "sdr";
 
-        string videoCodec = isReencode ? "h264" : (probe.VideoCodec ?? "");
-        int    bitDepth   = isReencode ? 8       : (probe.Is10Bit ? 10 : 8);
+        bool hevcOut = isReencode && target != VideoTarget.H264;
+        string videoCodec = isReencode ? (hevcOut ? "hevc" : "h264") : (probe.VideoCodec ?? "");
+        int    bitDepth   = isReencode ? (hevcOut ? 10 : 8) : (probe.Is10Bit ? 10 : 8);
 
         string container = isDirectPlay || isDirectStream ? "mp4"
                          : plan == HlsPlan.TsStreamCopy   ? "mpegts"
@@ -480,11 +481,12 @@ public sealed partial class HlsSessionService : IDisposable
         var hdrNote = !isReencode || !HdrToneMap.IsHdr(probe.ColorTransfer, probe.HasDolbyVision) ? ""
             : toneMapper != HdrToneMapper.None ? $" (HDR → SDR tone-mapped, {HdrToneMap.Describe(toneMapper)})"
             : " (HDR lost)";
+        var outName = hevcOut ? "HEVC Main10" : "H.264";
         string? reason = isDirectPlay || isDirectStream ? null : plan switch
         {
             HlsPlan.TsStreamCopy      => "H.264 source remuxed to MPEG-TS for HLS delivery",
-            HlsPlan.Fmp4VaapiReencode => "Re-encoded to H.264 via VAAPI (GPU) for browser compatibility" + hdrNote,
-            HlsPlan.Fmp4NvencReencode => "Re-encoded to H.264 via NVENC (GPU) for browser compatibility" + hdrNote,
+            HlsPlan.Fmp4VaapiReencode => $"Re-encoded to {outName} via VAAPI (GPU) for browser compatibility" + hdrNote,
+            HlsPlan.Fmp4NvencReencode => $"Re-encoded to {outName} via NVENC (GPU) for browser compatibility" + hdrNote,
             HlsPlan.Fmp4SoftwareReencode => "Re-encoded to H.264 via CPU (libx264) for the requested quality" + hdrNote,
             HlsPlan.Fmp4StreamCopy    => "HEVC stream-copied to fMP4 — original bitstream, no re-encode (browser decodes HEVC; HDR/10-bit preserved)",
             _                          => null,
@@ -752,6 +754,9 @@ public sealed partial class HlsSessionService : IDisposable
         // client). Irrelevant to re-encodes — they decode the base layer.
         var dovi = probe is not null && plan == HlsPlan.Fmp4StreamCopy
             ? DolbyVision.For(probe.Dovi, caps) : DoviHandling.None;
+        // What a re-encode writes: H.264 8-bit, or HEVC Main10 where the client
+        // and this plan's encoder can (ChooseVideoTarget).
+        var target = ChooseVideoTarget(plan, probe, caps);
         // The audio half (AudioPolicy): copy the mapped track when the client
         // decodes it and the plan's container (TS / fMP4) carries it, else
         // transcode — 5.1 for a 5.1-capable client, else a stereo downmix. An
@@ -774,9 +779,10 @@ public sealed partial class HlsSessionService : IDisposable
             int outW = targetHeight > 0 && probe.Height > 0
                 ? (int)Math.Round((double)probe.Width * targetHeight / probe.Height / 2) * 2
                 : probe.Width;
+            var videoTag = target == VideoTarget.H264 ? "avc1.4d401f" : Hevc10CodecsTag(outH);
             probeForPlaylist = probe with
             {
-                CodecsAttribute = $"avc1.4d401f,{audio.CodecsTag}",
+                CodecsAttribute = $"{videoTag},{audio.CodecsTag}",
                 Width  = outW,
                 Height = outH,
             };
@@ -918,8 +924,8 @@ public sealed partial class HlsSessionService : IDisposable
         // seg-{startSegment}.{ext} so the on-disk layout matches the playlist
         // we wrote. PTS handling depends on the plan (see BuildFfmpegArgs).
         var toneMapper = ToneMapperFor(plan, probe);
-        _logger.LogInformation("HLS {Token}: plan={Plan} audio={Audio} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H} dv={Dv}/{DvHandling}) tonemap={ToneMap} client={Client} {Owner}",
-            token, plan, audio, (int)Math.Round(audioOffsetSec * 1000),
+        _logger.LogInformation("HLS {Token}: plan={Plan} video={Target} audio={Audio} offset={OffsetMs}ms (codec={Vcodec}/{Acodec} {W}x{H} dv={Dv}/{DvHandling}) tonemap={ToneMap} client={Client} {Owner}",
+            token, plan, target, audio, (int)Math.Round(audioOffsetSec * 1000),
             probe?.VideoCodec, probe?.AudioCodec, probe?.Width, probe?.Height, probe?.Dovi, dovi, toneMapper, caps, who);
         // ffmpeg starts at the segment start computed above (ffmpegSeekSec), not
         // at the resume point — the playlist's EXT-X-START still says seekSec.
@@ -928,7 +934,7 @@ public sealed partial class HlsSessionService : IDisposable
             targetHeight: targetHeight,
             audioOffsetSec: audioOffsetSec, audioTrackIndex: audioTrackIndex,
             externalAudioPath: externalAudioPath, maxBitrate: maxBitrate, toneMapper: toneMapper, audio: audio,
-            dovi: dovi);
+            dovi: dovi, target: target);
         // Stderr drain (Warning-level log) + the tail an early exit is explained with.
         var stderrTail = new StderrTail();
         Process proc;
@@ -950,6 +956,7 @@ public sealed partial class HlsSessionService : IDisposable
             Probe = probe,
             Audio = audio,
             Dovi = dovi,
+            Target = target,
         };
         _sessions[token] = session;
         // The caller gave up on this start (rapid Next/Prev, player closed
@@ -1073,7 +1080,7 @@ public sealed partial class HlsSessionService : IDisposable
         // resolution (it carries the scaled Width/Height), not the source.
         var output = probe is not null
             ? BuildOutputInfo(probeForPlaylist ?? probe, plan, isDirectPlay: false, toneMapper: toneMapper,
-                audio: audio, dovi: dovi)
+                audio: audio, dovi: dovi, target: target)
             : new PlayerOutputInfo(
                 Plan:            "unknown",
                 Container:       plan == HlsPlan.TsStreamCopy ? "mpegts" : "fmp4",
@@ -1283,7 +1290,8 @@ public sealed partial class HlsSessionService : IDisposable
                 maxBitrate: session.MaxBitrate,
                 toneMapper: session.ToneMapper,
                 audio: session.Audio,
-                dovi: session.Dovi);
+                dovi: session.Dovi,
+                target: session.Target);
 
             // Same launcher as StartAsync (stderr drained + logged per line).
             Process proc;

@@ -37,7 +37,14 @@ public sealed class HardwareInfoService
         ToneMapSupport? ToneMapping = null,
         // VAAPI decodes HEVC Main10 (VAProfileHEVCMain10 / VLD) — gates the
         // 10-bit HEVC → H.264 re-encode on VAAPI hosts.
-        bool VaapiHevc10Decode = false);
+        bool VaapiHevc10Decode = false,
+        // HEVC Main10 ENCODE (hevc_vaapi / hevc_nvenc -profile:v main10) — gates
+        // the 10-bit HEVC outputs (Hi10P → HEVC Main10, HDR-keeping downscale).
+        // VAAPI: vainfo lists VAProfileHEVCMain10 with an EncSlice entry point
+        // (the prod Vega 11 / VCN 1.0 decodes Main10 but has NO Main10 encode).
+        // NVENC: a real 0.2 s test encode (Pascal and newer can).
+        bool VaapiHevc10Encode = false,
+        bool NvencHevc10Encode = false);
 
     /// <summary>HDR → SDR tone mappers the image's ffmpeg can actually run
     /// here. <see cref="Libplacebo"/> is a real end-to-end probe (VAAPI-derived
@@ -68,16 +75,26 @@ public sealed class HardwareInfoService
         var hwAccels = ProbeHwAccels();
         var encoders = ProbeHwEncoders();
         var vaapi = ProbeVaapi(hwAccels, encoders);
+        var nvenc = ProbeNvenc(hwAccels, encoders);
         return new HardwareReport(
             Vaapi:     vaapi,
-            Nvenc:     ProbeNvenc(hwAccels, encoders),
+            Nvenc:     nvenc,
             Qsv:       ProbeQsv(hwAccels, encoders),
             HwAccels:  hwAccels,
             HwEncoders: encoders,
             ProbedAt:   DateTime.UtcNow,
             ToneMapping: ProbeToneMapping(vaapi.Available),
             VaapiHevc10Decode: vaapi.Available
-                && Regex.IsMatch(_vainfo, @"VAProfileHEVCMain10\s*:\s*VAEntrypointVLD"));
+                && Regex.IsMatch(_vainfo, @"VAProfileHEVCMain10\s*:\s*VAEntrypointVLD"),
+            VaapiHevc10Encode: vaapi.Available && encoders.Contains("hevc_vaapi")
+                && Regex.IsMatch(_vainfo, @"VAProfileHEVCMain10\s*:\s*VAEntrypointEncSlice"),
+            NvencHevc10Encode: nvenc.Available && encoders.Contains("hevc_nvenc")
+                && RunExitCode("ffmpeg", new[]
+                {
+                    "-hide_banner", "-v", "error",
+                    "-f", "lavfi", "-i", "testsrc2=s=256x144:d=0.2,format=p010le",
+                    "-c:v", "hevc_nvenc", "-profile:v", "main10", "-f", "null", "-",
+                }, 10000).Ok);
     }
 
     private ToneMapSupport ProbeToneMapping(bool vaapiAvailable)
@@ -343,10 +360,12 @@ public sealed class HardwareInfoService
 
     private void LogReport(HardwareReport r)
     {
-        _logger.LogInformation("HW probe: VAAPI={V} NVENC={N} QSV={Q} HDR tone map: libplacebo={P} tonemapx={X} tonemap_cuda={C}",
+        _logger.LogInformation("HW probe: VAAPI={V} NVENC={N} QSV={Q} HEVC Main10 encode: vaapi={V10} nvenc={N10} HDR tone map: libplacebo={P} tonemapx={X} tonemap_cuda={C}",
             r.Vaapi.Available  ? $"✓ {r.Vaapi.Vendor} {r.Vaapi.DeviceName}".Trim() : "✗",
             r.Nvenc.Available  ? $"✓ {r.Nvenc.DeviceName}" : "✗",
             r.Qsv.Available    ? $"✓ Intel" : "✗",
+            r.VaapiHevc10Encode ? "✓" : "✗",
+            r.NvencHevc10Encode ? "✓" : "✗",
             r.ToneMapping?.Libplacebo == true ? $"✓ {r.ToneMapping.VulkanDevice}".Trim() : "✗",
             r.ToneMapping?.Tonemapx == true ? "✓" : "✗",
             r.ToneMapping?.TonemapCuda == true ? "✓" : "✗");

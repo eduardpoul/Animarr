@@ -140,6 +140,45 @@ public sealed partial class HlsSessionService
         Fmp4SoftwareReencode,
     }
 
+    /// <summary>What a re-encode plan writes (decided once per session, see
+    /// <see cref="ChooseVideoTarget"/>).</summary>
+    private enum VideoTarget
+    {
+        /// <summary>H.264 8-bit SDR — decodes everywhere; HDR is tone-mapped.</summary>
+        H264,
+        /// <summary>HEVC Main10, SDR: a Hi10P (10-bit H.264) source for a client
+        /// that decodes HEVC Main10 — the 10-bit gradients survive instead of
+        /// banding in an 8-bit H.264.</summary>
+        Hevc10,
+    }
+
+    /// <summary>
+    /// The re-encode's output format. HEVC Main10 needs a client that decodes
+    /// it (<c>hevc10</c> token / clientHevc10) AND an encoder for it on this
+    /// plan: NVENC can (probed), VAAPI only where vainfo lists a Main10 encode
+    /// entry point — the prod Vega 11 doesn't, so it stays on H.264 there —
+    /// and the CPU plan never (x265 is far too slow for real time). Otherwise
+    /// today's H.264 8-bit.
+    /// </summary>
+    private VideoTarget ChooseVideoTarget(HlsPlan plan, ProbeInfo? probe, ClientCaps client)
+    {
+        if (probe is null || !client.Hevc10) return VideoTarget.H264;
+        bool main10 = plan switch
+        {
+            HlsPlan.Fmp4NvencReencode => _hardware?.Current.NvencHevc10Encode == true,
+            HlsPlan.Fmp4VaapiReencode => _hardware?.Current.VaapiHevc10Encode == true,
+            _                         => false,
+        };
+        if (!main10) return VideoTarget.H264;
+        bool hi10p = string.Equals(probe.VideoCodec, "h264", StringComparison.OrdinalIgnoreCase) && probe.Is10Bit;
+        return hi10p ? VideoTarget.Hevc10 : VideoTarget.H264;
+    }
+
+    /// <summary>RFC 6381 string of a HEVC Main10 re-encode for the master
+    /// playlist: Main10, level by output height (L3.1 / L4 / L5.1).</summary>
+    private static string Hevc10CodecsTag(int height)
+        => $"hvc1.2.4.L{(height <= 720 ? 93 : height <= 1080 ? 120 : 153)}.B0";
+
     /// <summary>H.264 video bitrate ladder by OUTPUT height (target kbps).
     /// Used by every re-encode plan so a 720p stream isn't shipped at 4K
     /// bitrate (and vice-versa). Tuned for LAN delivery — the old ladder
@@ -257,7 +296,9 @@ public sealed partial class HlsSessionService
             // (Direct Stream). No re-encode, no quality loss, fast start —
             // 8-bit and 10-bit/HDR alike. This is the path that makes Animarr
             // match a native client's quality instead of re-encoding to H.264.
-            if (clientHevc && !mustReencode)
+            // 10-bit needs the Main10 capability (clientHevc10 / hevc10), not
+            // just "decodes HEVC" — a Main-only decoder can't take it.
+            if ((probe.Is10Bit ? client.Hevc10 : clientHevc) && !mustReencode)
                 return HlsPlan.Fmp4StreamCopy;
 
             // Browser can't decode HEVC → re-encode to H.264 for compatibility

@@ -41,7 +41,9 @@ public sealed partial class HlsSessionService
         // session). null = the historical AAC stereo transcode.
         AudioDecision? audio = null,
         // Dolby Vision treatment of the fMP4 copy (DolbyVision.For).
-        DoviHandling dovi = DoviHandling.None)
+        DoviHandling dovi = DoviHandling.None,
+        // What the GPU re-encodes write (ChooseVideoTarget).
+        VideoTarget target = VideoTarget.H264)
     {
         var args = new List<string>();
         var audioArgs = (audio ?? new AudioDecision(false, "aac", 2, "192k")).Args().ToArray();
@@ -77,11 +79,11 @@ public sealed partial class HlsSessionService
                 break;
             case HlsPlan.Fmp4VaapiReencode:
                 BuildFmp4VaapiArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target);
                 break;
             case HlsPlan.Fmp4NvencReencode:
                 BuildFmp4NvencArgs(args, fullPath, seekSec, audioOffsetSec, startNumber, targetHeight, audioTrackIndex,
-                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs);
+                    externalAudioPath, rate, hwDecodeCodec, toneMapper, videoMap, audioArgs, target);
                 break;
             case HlsPlan.Fmp4StreamCopy:
                 BuildFmp4StreamCopyArgs(args, fullPath, seekSec, startNumber, videoCodec, audioOffsetSec, audioTrackIndex,
@@ -352,7 +354,8 @@ public sealed partial class HlsSessionService
     private static void BuildFmp4VaapiArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
-        HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null)
+        HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null,
+        VideoTarget target = VideoTarget.H264)
     {
         // Re-encoding the video stream eliminates the B-frame display reorder
         // that puts the first reorderable frame ~83ms past the segment
@@ -424,7 +427,16 @@ public sealed partial class HlsSessionService
             args.Add("-copyts");
         }
         var size = targetHeight > 0 ? $"w=-2:h={targetHeight}:" : "";
-        string vf = (hwDecode, toneMapper) switch
+        bool main10 = target != VideoTarget.H264;
+        string vf = main10
+            // HEVC Main10 out (hevc_vaapi -profile main10): p010 surfaces all
+            // the way, no tone mapping — GPU-decoded frames are scaled on the
+            // GPU; software-decoded ones (Hi10P: no VAAPI High10 decoder) are
+            // uploaded as p010 first.
+            ? hwDecode
+                ? $"scale_vaapi={size}format=p010"
+                : "format=p010le,hwupload" + (targetHeight > 0 ? $",scale_vaapi=w=-2:h={targetHeight}" : "")
+            : (hwDecode, toneMapper) switch
         {
             // HDR on the GPU path. Downscale FIRST on the VAAPI surfaces (cheap
             // fixed-function), then download the p010 frames for tone mapping:
@@ -454,16 +466,17 @@ public sealed partial class HlsSessionService
             "-map", videoMap,     // the probed main video, never a cover picture
             "-map", $"1:a:{audioTrackIndex}?",
             "-vf", vf,
-            "-c:v", "h264_vaapi",
-            "-profile:v", "main",
+            "-c:v", main10 ? "hevc_vaapi" : "h264_vaapi",
+            "-profile:v", main10 ? "main10" : "main",
             "-bf",     "0",
             "-b:v",    rate.V,
             "-maxrate",rate.Max,
             "-bufsize",rate.Buf,
             "-force_key_frames", ForceKeyFramesExpr,
         });
+        if (main10) args.AddRange(new[] { "-tag:v", "hvc1" });   // Chrome/Edge refuse hev1 in fMP4
         args.AddRange(audioArgs ?? DefaultAudioArgs);
-        if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
+        if (!main10 && toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
     }
 
     /// <summary>fMP4 HLS with NVIDIA NVENC re-encode to H.264 + B-frames
@@ -475,7 +488,8 @@ public sealed partial class HlsSessionService
     private static void BuildFmp4NvencArgs(List<string> args, string fullPath, double seekSec,
         double audioOffsetSec, int startNumber, int targetHeight, int audioTrackIndex,
         string? externalAudioPath, EncodeRate rate, string? videoCodec = null,
-        HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null)
+        HdrToneMapper toneMapper = HdrToneMapper.None, string videoMap = "0:V:0?", string[]? audioArgs = null,
+        VideoTarget target = VideoTarget.H264)
     {
         // CUDA-backed decode + NVENC encode. `-hwaccel_output_format cuda`
         // keeps frames on the GPU between decode and encode, avoiding a
@@ -518,7 +532,15 @@ public sealed partial class HlsSessionService
         // plain CPU scale for software-decoded legacy codecs (NVENC takes
         // system-memory nv12/yuv420p frames directly).
         var size = targetHeight > 0 ? $"w=-2:h={targetHeight}:" : "";
-        var vf = (hwDecode, toneMapper) switch
+        bool main10 = target != VideoTarget.H264;
+        var vf = main10
+            // HEVC Main10 out: p010 frames, no tone mapping — on the GPU for
+            // NVDEC-decoded input, system-memory p010le for software-decoded
+            // input (Hi10P: NVDEC has no H.264 High10 decoder).
+            ? hwDecode
+                ? $"scale_cuda={size}format=p010"
+                : (targetHeight > 0 ? $"scale=-2:{targetHeight}," : "") + "format=p010le"
+            : (hwDecode, toneMapper) switch
         {
             // HDR: scale on the GPU in 10-bit, then tone-map — on the GPU with
             // tonemap_cuda, or downloaded to the CPU tonemapx (NVENC takes
@@ -535,10 +557,10 @@ public sealed partial class HlsSessionService
             "-map", videoMap,     // the probed main video, never a cover picture
             "-map", $"1:a:{audioTrackIndex}?",
             "-vf", vf,
-            "-c:v", "h264_nvenc",
+            "-c:v", main10 ? "hevc_nvenc" : "h264_nvenc",
             "-preset", "p4",          // p1=fastest, p7=highest quality; p4 is balanced
             "-tune", "hq",
-            "-profile:v", "main",
+            "-profile:v", main10 ? "main10" : "main",
             "-bf",     "0",           // no B-frames → tight A/V sync per segment
             // A forced key frame must be an IDR: NVENC makes it a plain I frame
             // by default, which isn't flagged as a key frame, so the HLS muxer
@@ -551,8 +573,9 @@ public sealed partial class HlsSessionService
             "-bufsize",rate.Buf,
             "-force_key_frames", ForceKeyFramesExpr,
         });
+        if (main10) args.AddRange(new[] { "-tag:v", "hvc1" });   // Chrome/Edge refuse hev1 in fMP4
         args.AddRange(audioArgs ?? DefaultAudioArgs);
-        if (toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
+        if (!main10 && toneMapper != HdrToneMapper.None) args.AddRange(HdrToneMap.Bt709OutputTags);
     }
 
     /// <summary>fMP4 HLS via SOFTWARE libx264 re-encode + optional downscale.
