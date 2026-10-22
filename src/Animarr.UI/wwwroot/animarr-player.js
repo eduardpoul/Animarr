@@ -1337,17 +1337,20 @@
                 const bars = auto ? (view && view.bars) || null : null;
                 const want = auto ? (bars ? bars.ratio : 'default') : (ratio || 'default');
                 if (this.art.aspectRatio !== want) this.art.aspectRatio = want;
-                video.style.objectFit = auto ? (bars ? 'cover' : '')
+                // The bar cut: the frame contained in the picture-aspect box,
+                // scaled / shifted so the crop rect (wherever it sits) fills
+                // the box, the bars clipped off (barsGeometry).
+                video.style.objectFit = auto ? ''
                                       : (mode === 'fill' || mode === 'crop') ? 'cover'
                                       : (mode === 'stretch' || mode === 'force') ? 'fill' : '';
+                video.style.clipPath = bars ? bars.clip : '';
                 const z = Math.max(1, (view && view.zoom) || 1);
                 const p = Math.max(-1, Math.min(1, (view && view.pan) || 0));
-                // Without bars the cover overflow is panned by object-position;
-                // the bars crop uses it to pick the picture out of the frame.
-                video.style.objectPosition = bars ? bars.posX.toFixed(2) + '% ' + bars.posY.toFixed(2) + '%'
-                                           : p ? '50% ' + (50 + p * 50) + '%' : '';
-                video.style.transform = (z !== 1 || p)
+                // The cover overflow is panned by object-position.
+                video.style.objectPosition = !bars && p ? '50% ' + (50 + p * 50) + '%' : '';
+                const zoomPan = (z !== 1 || p)
                     ? 'scale(' + z + ') translateY(' + (-p * (z - 1) / (2 * z) * 100).toFixed(3) + '%)' : '';
+                video.style.transform = [zoomPan, bars ? bars.transform : ''].filter(Boolean).join(' ');
             } catch (e) { console.warn('picture geometry failed', e); }
         }
 
@@ -2132,15 +2135,35 @@
      *  the object-position that puts the picture in it, and the fractions. */
     function barsGeometry(facts) {
         const v = facts && facts.video;
-        if (!v || v.cropStatus !== 'detected' || !v.crop || !(v.contentAspect > 0) || !v.width || !v.height) return null;
-        const cx = v.crop.x / v.width, cy = v.crop.y / v.height;
-        const cw = v.crop.width / v.width, ch = v.crop.height / v.height;
+        if (!v || v.cropStatus !== 'detected' || !v.crop || !v.width || !v.height) return null;
+        const cx = Math.max(0, v.crop.x / v.width), cy = Math.max(0, v.crop.y / v.height);
+        const cw = Math.min(1 - cx, v.crop.width / v.width), ch = Math.min(1 - cy, v.crop.height / v.height);
         if (!(cw > 0 && ch > 0) || (cw > 0.995 && ch > 0.995)) return null;
-        const pos = (o, size) => size < 0.995 ? Math.max(0, Math.min(100, o / (1 - size) * 100)) : 50;
+        // D: the whole frame on screen (pixel aspect applied); A: the picture
+        // inside the bars — the same as the server's contentAspect, computed
+        // here so the box and the scale below agree exactly.
+        const D = v.displayAspect > 0 ? v.displayAspect : v.width / v.height;
+        const A = cw * D / ch;
+        // In box units (the A box Artplayer sizes the <video> to: A wide,
+        // 1 high) the frame is CONTAINED: k its height, (ox, oy) its corner;
+        // the picture is the crop rect (x0, y0, w × h) inside it — anywhere,
+        // bars on one side or all four.
+        const k = Math.min(A / D, 1);
+        const ox = (A - D * k) / 2, oy = (1 - k) / 2;
+        const x0 = ox + cx * D * k, y0 = oy + cy * k, w = cw * D * k, h = ch * k;
+        // One uniform scale makes the crop rect fill the box (same aspect),
+        // a shift puts its centre on the box's; the rest is clipped (in the
+        // element's own, untransformed space).
+        const scale = 1 / h;
+        const tx = -((x0 + w / 2) - A / 2) * scale / A * 100;
+        const ty = -((y0 + h / 2) - 0.5) * scale * 100;
+        const pct = (n) => Math.max(0, n * 100).toFixed(3) + '%';
         return {
-            ratio: (Math.round(v.contentAspect * 10000) / 10000) + ':1',
-            posX: pos(cx, cw), posY: pos(cy, ch), cw, ch,
-            displayAspect: v.displayAspect || (v.width / v.height), contentAspect: v.contentAspect,
+            ratio: (Math.round(A * 10000) / 10000) + ':1',
+            transform: 'translate(' + tx.toFixed(3) + '%, ' + ty.toFixed(3) + '%) scale(' + scale.toFixed(5) + ')',
+            clip: 'inset(' + pct(y0) + ' ' + pct((A - x0 - w) / A) + ' ' + pct(1 - y0 - h) + ' ' + pct(x0 / A) + ')',
+            cx, cy, cw, ch,
+            displayAspect: D, contentAspect: A,
             letterbox: !!v.letterbox, pillarbox: !!v.pillarbox,
         };
     }
