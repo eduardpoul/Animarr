@@ -187,6 +187,9 @@ builder.Services.AddSingleton<MediaFileResolveCache>();
 builder.Services.AddScoped<EpisodeLlmResolver>();
 builder.Services.AddScoped<SeasonOffsetResolver>();
 builder.Services.AddScoped<ExternalTrackService>();
+// Directory listings + episode parses of the external-track sweep, reused
+// while every folder's mtime is unchanged.
+builder.Services.AddSingleton<ExternalTrackListingCache>();
 
 // ─── Skip intro/credits — segment detection ───────────────────────────────
 // AniSkip: crowd-sourced OP/ED timestamps by MAL id (free, no auth). Needs an

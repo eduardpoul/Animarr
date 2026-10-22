@@ -28,6 +28,27 @@ public sealed record ExternalTrackDto(
     /// <summary>Best-effort ISO-ish language token ("rus", "eng", …) or null.</summary>
     string? Language,
     /// <summary>How the match was made: "sidecar" (Tier 0 — same dir + stem) or
-    /// "episode" (Tier 1 — same season/episode bucket elsewhere in the tree).
+    /// "episode" (Tier 1 — elsewhere in the title's tree: same season/episode,
+    /// the video's own name in a sub-folder, or a movie folder's only video).
     /// Lets the UI prefer the higher-confidence sidecar when both exist.</summary>
-    string MatchTier);
+    string MatchTier,
+    /// <summary>ffprobe codec_name of the file's first audio / subtitle stream
+    /// ("aac", "opus", "subrip", "ass"); null when not probed.</summary>
+    string? Codec = null,
+    /// <summary>Audio channel count; null for subtitles / not probed.</summary>
+    int? Channels = null,
+    /// <summary>Duration in seconds; null when unknown.</summary>
+    double? DurationSec = null,
+    /// <summary>Delay written into the name (<c>DELAY 500ms</c>, <c>DELAY -120ms</c>)
+    /// in milliseconds; null when the name has none.</summary>
+    int? DelayMs = null,
+    /// <summary>Stable identity of the dub / subtitle group across episodes
+    /// (<c>sidecar:ukr</c>, <c>dir:russian dub</c>, …) — what per-profile track
+    /// memory keys an external choice on. Opaque to clients.</summary>
+    string? GroupKey = null,
+    /// <summary>Folder of the file relative to the title root, '/'-separated
+    /// ("Russian Dub", "Season 1/Rus Sub/Signs"); "" for the root itself.</summary>
+    string? Folder = null,
+    /// <summary>Subtitles only: "full", "forced" or "signs" (signs / songs /
+    /// надписи in the name or folders). Null for audio.</summary>
+    string? SubtitleType = null);
