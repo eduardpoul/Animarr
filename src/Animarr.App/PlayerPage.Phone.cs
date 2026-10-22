@@ -551,8 +551,10 @@ public partial class PlayerPage
     /// player demuxes and decodes it all itself and seeks in it) unless the
     /// choice needs the server — a sidecar dub, a burned-in subtitle, a
     /// quality cap: then an HLS session of its own (full-length playlist,
-    /// so the position stays absolute). Returns that session's token (to stop
-    /// it afterwards) and whether the stream starts at the position already.</summary>
+    /// so the position stays absolute) — client=external, so it doesn't
+    /// replace this player's session for the same file (a server without
+    /// the parameter ignores it). Returns that session's token (to stop it
+    /// afterwards) and whether the stream starts at the position already.</summary>
     private async Task<(string? Url, string? Token, bool FromStart)> ExternalStreamAsync(long posMs)
     {
         try
@@ -568,7 +570,7 @@ public partial class PlayerPage
                 _                     => "",
             };
             var url = $"/api/hls/start?path={Uri.EscapeDataString(_filePath)}&seek={posMs / 1000}&maxHeight={_maxHeight}" +
-                      audio + BurnStartParam() + "&clientHevc=1&clientHevc10=1&remux=hls" +
+                      audio + BurnStartParam() + "&clientHevc=1&clientHevc10=1&remux=hls&client=external" +
                       $"&maxAudioChannels={Services.TvCodecCaps.MaxAudioChannels()}";
             using var resp = await _http.PostAsync(url, null);
             if (!resp.IsSuccessStatusCode) { Log($"external start: HTTP {(int)resp.StatusCode}"); return (null, null, false); }
@@ -582,7 +584,8 @@ public partial class PlayerPage
     }
 
     /// <summary>Back from the other app: its position becomes the watch
-    /// progress, and this player waits there (paused).</summary>
+    /// progress, and this player waits there (paused) — a seek in its own
+    /// stream, which the external session no longer replaced.</summary>
     private void OnExternalResult(ExternalResult r, string? token, string file, long startedAt)
     {
         if (token is not null) StopHlsSession(token);
@@ -592,7 +595,7 @@ public partial class PlayerPage
         {
             RecordProgress(dur, dur);
             FlashInfo("Досмотрено во внешнем плеере");
-            _ = StartStreamAsync(Math.Max(0, dur - 5_000), _maxHeight, playWhenReady: false);
+            SeekToAbs(Math.Max(0, dur - 5_000));
             return;
         }
         if (r.PositionMs is long reported && reported > 0)
@@ -600,7 +603,7 @@ public partial class PlayerPage
             long pos = dur > 0 ? Math.Min(reported, Math.Max(0, dur - 1_000)) : reported;
             RecordProgress(pos, dur);
             FlashInfo($"Внешний плеер: остановлено на {Fmt(pos)}");
-            _ = StartStreamAsync(pos, _maxHeight, playWhenReady: false);
+            SeekToAbs(pos);
             return;
         }
         // The chooser / a player that reports nothing: stay where it was.
