@@ -456,47 +456,18 @@ html:has(.vp-backdrop) { overflow: hidden; }
 }
 .vp-hud[data-style="icons"] .vp-label { display: none; }
 .vp-hud[data-style="icons"] .vp-glyph svg {
-    width: 23px;
-    height: 23px;
+    /* The Fluent glyphs' own 24 px grid: strokes land on whole pixels. */
+    width: 24px;
+    height: 24px;
     /* No chip behind icons (user's call) — instead a crisp drop-shadow so the
        white glyph stays readable over bright video. The bottom/top scrim
        gradients carry most of the contrast; this shadow handles the rest. */
     filter: drop-shadow(0 1px 2px rgba(0,0,0,0.9));
 }
 
-/* +10s button is special — in icons mode we replace the SVG with literal
-   "+10" text so the action remains readable without depending on a
-   tooltip. Outside icons mode the text alt-glyph stays hidden and the
-   SVG + "+10s" label do the work. */
-.vp-icon-text {
-    display: none;
-    font-weight: 800;
-    font-size: 13px;
-    letter-spacing: -0.02em;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    /* White glyph-text by default (e.g. "CC"); shadow keeps it readable on any
-       frame. We use HTML spans rather than SVG <text> because SVG text injected
-       via innerHTML does NOT render in this WebView/Artplayer-layer context —
-       this span mechanism is the same one the ±10 buttons use, which renders. */
-    color: #fff;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.9);
-}
-/* ±10 stay accent-blue (user asked for the numerals to be coloured). */
-.vp-btn[data-act="fwd10"] .vp-icon-text,
-.vp-btn[data-act="back10"] .vp-icon-text { color: var(--hud-accent-hi); }
-.vp-hud[data-style="icons"] .vp-btn[data-act="fwd10"] .vp-glyph,
-.vp-hud[data-style="icons"] .vp-btn[data-act="back10"] .vp-glyph,
-.vp-hud[data-style="icons"] .vp-btn[data-act="cc"] .vp-glyph,
-.vp-hud[data-style="icons"] .vp-btn[data-act="info"] .vp-glyph,
-.vp-hud[data-style="icons"] .vp-btn[data-act="audio"] .vp-glyph,
-.vp-hud[data-style="icons"] .vp-btn[data-act="offset"] .vp-glyph { display: none; }
-.vp-hud[data-style="icons"] .vp-btn[data-act="fwd10"] .vp-icon-text,
-.vp-hud[data-style="icons"] .vp-btn[data-act="back10"] .vp-icon-text,
-.vp-hud[data-style="icons"] .vp-btn[data-act="cc"] .vp-icon-text,
-.vp-hud[data-style="icons"] .vp-btn[data-act="info"] .vp-icon-text,
-.vp-hud[data-style="icons"] .vp-btn[data-act="audio"] .vp-icon-text,
-.vp-hud[data-style="icons"] .vp-btn[data-act="offset"] .vp-icon-text { display: inline-block; }
+/* ±10: the Fluent skip glyph's digits stay accent-coloured (user's ask) —
+   the icon is two paths, the arrow in currentColor and the digits. */
+.vp-glyph__digits { fill: var(--hud-accent-hi); }
 
 /* ── Popup picker (CC / Audio / Aspect) ──────────────────────────── */
 .vp-hud-popup {
@@ -767,10 +738,15 @@ html:has(.vp-backdrop) { overflow: hidden; }
     transition: background 120ms ease, border-color 120ms ease;
 }
 .vp-upnext__btn--play {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     background: oklch(0.72 0.18 var(--accent-hue, 245));
     color: #0f1115;
     font-weight: 700;
 }
+.vp-upnext__btn--play svg { width: 16px; height: 16px; flex: none; }
 .vp-upnext__btn--play:hover { background: oklch(0.80 0.15 var(--accent-hue, 245)); }
 .vp-upnext__btn--skip {
     background: rgba(255, 255, 255, 0.08);
@@ -786,10 +762,10 @@ html:has(.vp-backdrop) { overflow: hidden; }
     background: none;
     border: none;
     color: rgba(255, 255, 255, 0.55);
-    font-size: 22px;
-    line-height: 1;
+    line-height: 0;
     cursor: pointer;
 }
+.vp-upnext__close svg { width: 20px; height: 20px; }
 .vp-upnext__close:hover { color: #fff; }
 
 @media (max-width: 560px) {
@@ -903,8 +879,20 @@ html:has(.vp-backdrop) { overflow: hidden; }
     100% { opacity: 0; transform: translateY(-50%) scale(1); }
 }
 
-/* Settings menu — same shell as the pickers, list of worded rows. */
+/* Settings menu — same shell as the pickers, list of worded rows, each led
+   by its HUD button's glyph (Fluent menu style). */
 .vp-hud-popup--menu { min-width: 240px; }
+.vp-hud-popup--menu .vp-hud-popup__item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.vp-hud-popup--menu .vp-hud-popup__item svg {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    color: #c8c8c8;
+}
 
 /* Kill the mobile double-tap-zoom heuristic on the controls: it adds a ~300ms
    click delay AND fires a synthesized "ghost" click ~300ms after the real one,

@@ -1483,32 +1483,50 @@
         return rate === 1 ? '' : String(rate).replace(/^0\./, '.') + '×';
     }
 
-    // ── SVG icons (feather-style, 18px, stroke-based) ─────────────────
-    // Kept as one big map so the icons-only mode renders crisply and both
-    // modes look consistent. Each is a 24x24 viewBox so we can re-size
-    // uniformly with `width=18`.
-    const I = {
-        back:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>',
-        prev:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>',
-        next:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>',
-        play:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>',
-        pause:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>',
-        fwd10:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><text x="12" y="15.5" text-anchor="middle" font-size="8" font-weight="800" fill="var(--hud-accent-hi)" stroke="none" font-family="Inter, system-ui, sans-serif">10</text></svg>',
-        back10: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><text x="12" y="15.5" text-anchor="middle" font-size="8" font-weight="800" fill="var(--hud-accent-hi)" stroke="none" font-family="Inter, system-ui, sans-serif">10</text></svg>',
-        audio:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
-        cc:     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M7 11h4"/><path d="M7 14.5h7"/><path d="M16 11h1"/></svg>',
-        aspect: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12a3 3 0 0 0 3 3h12"/><path d="M18 21V9a3 3 0 0 0-3-3H3"/></svg>',
-        offset: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 13V9.5"/><path d="M9.5 2.5h5"/><path d="M12 2.5v3"/><path d="M18.5 7l1.2-1.2"/></svg>',
-        cast:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 17a3 3 0 0 1 3 3"/><path d="M2 13a7 7 0 0 1 7 7"/><path d="M2 9 a11 11 0 0 1 11 11"/><path d="M2 5h17a2 2 0 0 1 2 2v9"/></svg>',
-        volume: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>',
-        mute:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>',
-        fsEnter:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9V5a2 2 0 0 1 2-2h4"/><path d="M15 3h4a2 2 0 0 1 2 2v4"/><path d="M21 15v4a2 2 0 0 1-2 2h-4"/><path d="M9 21H5a2 2 0 0 1-2-2v-4"/></svg>',
-        fsExit: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v4a2 2 0 0 1-2 2H3"/><path d="M21 9h-4a2 2 0 0 1-2-2V3"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/><path d="M3 15h4a2 2 0 0 1 2 2v4"/></svg>',
-        info:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><line x1="12" y1="11" x2="12" y2="16.5" stroke-width="2.2"/><circle cx="12" cy="7.6" r="1.25" fill="currentColor" stroke="none"/></svg>',
-        speed:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 17.5a9 9 0 1 1 15.6 0"/><path d="M12 13.5 16 9"/><circle cx="12" cy="13.5" r="1.2" fill="currentColor" stroke="none"/></svg>',
-        quality:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.7 7.7 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.5 6.5 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.5 6.5 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.9 6.9 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><circle cx="12" cy="12" r="3"/></svg>',
-        settings:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.33 4.32c.42-1.76 2.92-1.76 3.34 0a1.72 1.72 0 0 0 2.58 1.07c1.54-.94 3.3.82 2.37 2.37a1.72 1.72 0 0 0 1.06 2.57c1.76.42 1.76 2.92 0 3.34a1.72 1.72 0 0 0-1.07 2.58c.94 1.54-.82 3.3-2.37 2.37a1.72 1.72 0 0 0-2.57 1.06c-.42 1.76-2.92 1.76-3.34 0a1.72 1.72 0 0 0-2.58-1.07c-1.54.94-3.3-.82-2.37-2.37a1.72 1.72 0 0 0-1.06-2.57c-1.76-.42-1.76-2.92 0-3.34a1.72 1.72 0 0 0 1.07-2.58c-.94-1.54.82-3.3 2.37-2.37a1.72 1.72 0 0 0 2.57-1.06z"/><circle cx="12" cy="12" r="3"/></svg>',
+    // ── Icons ─────────────────────────────────────────────────────────
+    // Fluent UI System Icons (MIT, Copyright (c) 2020 Microsoft Corporation,
+    // github.com/microsoft/fluentui-system-icons) — the family of the app's
+    // DIcon and of the phone / TV players' icon font: 24 px regular, filled
+    // for play / pause / previous / next. Path data written by
+    // tools/icons/build_player_icons.py — regenerate rather than hand-edit.
+    // ±10 are two paths, the arrow and the digits (tinted with the accent).
+    // <fluent-icons>
+    const ICON_PATHS = {
+        back:      'M10.73 19.8a.75.75 0 0 0 1.04-1.1l-6.25-5.95h14.73a.75.75 0 0 0 0-1.5H5.52l6.25-5.95a.75.75 0 0 0-1.04-1.1l-7.42 7.08a1 1 0 0 0 0 1.44z',
+        prev:      'M3 3.75a.75.75 0 0 1 1.5 0v16.5a.75.75 0 0 1-1.5 0zm18 1c0-1.4-1.58-2.24-2.74-1.44l-10.5 7.2a1.75 1.75 0 0 0 0 2.87l10.5 7.3c1.15.81 2.74-.02 2.74-1.43z',
+        next:      'M3 4.75c0-1.4 1.58-2.24 2.74-1.44l10.5 7.2c1 .68 1.01 2.17 0 2.87l-10.5 7.3A1.75 1.75 0 0 1 3 19.25zm18-1a.75.75 0 0 0-1.5 0v16.5a.75.75 0 0 0 1.5 0z',
+        play:      'M5 5.27c0-1.7 1.83-2.79 3.33-1.97l12.36 6.72a2.25 2.25 0 0 1 0 3.96L8.33 20.7A2.25 2.25 0 0 1 5 18.73z',
+        pause:     'M5.75 3C4.78 3 4 3.78 4 4.75v14.5c0 .97.78 1.75 1.75 1.75h3.5c.96 0 1.75-.78 1.75-1.75V4.75C11 3.78 10.2 3 9.25 3zm9 0C13.78 3 13 3.78 13 4.75v14.5c0 .97.78 1.75 1.75 1.75h3.5c.96 0 1.75-.78 1.75-1.75V4.75C20 3.78 19.2 3 18.25 3z',
+        back10:    ['M2.75 2.5C2.34 2.5 2 2.84 2 3.25V8.75C2 9.16 2.34 9.5 2.75 9.5H8.25C8.66 9.5 9 9.16 9 8.75C9 8.34 8.66 8 8.25 8H4.35C5.37 6.57 6.81 5.5 8.47 4.94C12.69 3.63 17.27 5.34 19.6 9.1C19.8 9.46 20.26 9.6 20.62 9.4C20.98 9.2 21.12 8.74 20.92 8.38C18.25 3.99 12.94 1.98 8.03 3.51C6.25 4.09 4.67 5.18 3.5 6.65L3.5 3.25C3.5 2.84 3.16 2.5 2.75 2.5',
+                   'M8.95 11.03C9.28 11.12 9.5 11.41 9.5 11.75V20.25C9.5 20.66 9.16 21 8.75 21C8.34 21 8 20.66 8 20.25V13.83Q7.43 14.41 6.64 14.89C6.41 15.04 6.12 15.06 5.87 14.93C5.63 14.8 5.48 14.55 5.48 14.27C5.47 14 5.62 13.74 5.86 13.61C6.77 13.04 7.53 12.28 8.1 11.37L8.11 11.36C8.29 11.07 8.63 10.94 8.95 11.03M13.2 12.63C13.75 11.63 14.68 11 16 11C17.32 11 18.25 11.64 18.8 12.63C19.33 13.56 19.5 14.78 19.5 16C19.5 17.22 19.33 18.44 18.8 19.37C18.27 20.41 17.17 21.05 16 21C14.83 21.05 13.73 20.41 13.2 19.37C12.69 18.32 12.45 17.16 12.5 16C12.5 14.78 12.68 13.56 13.2 12.63M14.5 13.36C14.12 14.19 13.95 15.09 14 16C14 17.12 14.17 18.03 14.5 18.64C14.81 19.19 15.26 19.5 16 19.5C16.74 19.5 17.19 19.19 17.5 18.64C17.83 18.04 18 17.12 18 16C18.05 15.09 17.88 14.19 17.5 13.36C17.19 12.81 16.74 12.5 16 12.5C15.26 12.5 14.81 12.81 14.5 13.36'],
+        fwd10:     ['M21.25 2.5C21.66 2.5 22 2.84 22 3.25V8.75C22 9.16 21.66 9.5 21.25 9.5H15.75C15.34 9.5 15 9.16 15 8.75C15 8.34 15.34 8 15.75 8H19.65C18.63 6.57 17.19 5.5 15.53 4.94C11.31 3.63 6.73 5.34 4.4 9.1C4.2 9.46 3.74 9.6 3.38 9.4C3.02 9.2 2.88 8.74 3.08 8.38C5.74 3.99 11.06 1.97 15.96 3.5C17.74 4.08 19.32 5.17 20.49 6.64V3.24C20.49 2.83 20.83 2.49 21.24 2.49',
+                   'M16 11C14.68 11 13.75 11.64 13.2 12.63C12.68 13.56 12.5 14.78 12.5 16C12.5 17.22 12.68 18.44 13.2 19.37C13.75 20.37 14.68 21 16 21C17.32 21 18.25 20.36 18.8 19.37C19.33 18.44 19.5 17.22 19.5 16C19.5 14.78 19.33 13.56 18.8 12.63C18.27 11.59 17.17 10.95 16 11M14 16C14 14.88 14.17 13.97 14.5 13.36C14.81 12.81 15.26 12.5 16 12.5C16.74 12.5 17.19 12.81 17.5 13.36C17.83 13.96 18 14.88 18 16C18.05 16.91 17.88 17.81 17.5 18.64C17.19 19.19 16.74 19.5 16 19.5C15.26 19.5 14.81 19.19 14.5 18.64C14.12 17.81 13.95 16.91 14 16M9.5 11.75C9.5 11.41 9.28 11.11 8.96 11.02C8.63 10.93 8.29 11.06 8.11 11.35L8.11 11.36L7.96 11.58Q7.81 11.81 7.51 12.17C7.11 12.64 6.54 13.2 5.86 13.61C5.62 13.74 5.47 14 5.48 14.27C5.48 14.55 5.63 14.8 5.87 14.93C6.12 15.06 6.41 15.04 6.64 14.89Q7.43 14.41 8 13.83V20.25C8 20.66 8.34 21 8.75 21C9.16 21 9.5 20.66 9.5 20.25V11.75Z'],
+        audio:     'M3.5 12a8.5 8.5 0 0 1 17 0v2h-2.25a.75.75 0 0 0-.75.75v6.5c0 .41.34.75.75.75H19a3 3 0 0 0 3-3v-7a10 10 0 0 0-20 0v7a3 3 0 0 0 3 3h.75c.41 0 .75-.34.75-.75v-6.5a.75.75 0 0 0-.75-.75H3.5zm17 3.5V19c0 .83-.67 1.5-1.5 1.5v-5zM3.5 19v-3.5H5v5A1.5 1.5 0 0 1 3.5 19m9.25-7.25a.75.75 0 0 0-1.5 0v10.5a.75.75 0 0 0 1.5 0zm-4 2.25c.41 0 .75.34.75.75v4.5a.75.75 0 0 1-1.5 0v-4.5c0-.41.34-.75.75-.75m7.25.75a.75.75 0 0 0-1.5 0v4.5a.75.75 0 0 0 1.5 0z',
+        cc:        'M2 7.25C2 5.45 3.46 4 5.25 4h13.5C20.55 4 22 5.46 22 7.25v9.5c0 1.8-1.46 3.25-3.25 3.25H5.25A3.25 3.25 0 0 1 2 16.75zM5.25 5.5c-.97 0-1.75.78-1.75 1.75v9.5c0 .97.78 1.75 1.75 1.75h13.5c.97 0 1.75-.78 1.75-1.75v-9.5c0-.97-.78-1.75-1.75-1.75zM5 13.25c0-.41.34-.75.75-.75h7.5a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1-.75-.75m10.75-.75a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5zM5 16.25c0-.41.34-.75.75-.75h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1-.75-.75m6.75-.75a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5z',
+        quality:   'M5.25 4A3.25 3.25 0 0 0 2 7.25v5.56q.67-.65 1.5-1.08V7.25c0-.97.78-1.75 1.75-1.75h7.5c.97 0 1.75.78 1.75 1.75v7.5c0 .9-.7 1.66-1.58 1.74a7 7 0 0 1 .06 1.5A3.25 3.25 0 0 0 16 14.75v-.31l3.26 2.25c1.16.8 2.74-.03 2.74-1.44v-8.5a1.75 1.75 0 0 0-2.74-1.44L16 7.56v-.31C16 5.45 14.54 4 12.75 4zM16 9.38l4.11-2.83c.17-.12.4 0 .4.2v8.5c0 .2-.23.32-.4.2L16 12.62zm-12.72 4.6-.2-.7q.66-.56 1.48-.9l.5.52a2 2 0 0 0 2.9 0l.5-.52q.81.35 1.48.93l-.19.63a2 2 0 0 0 1.45 2.5l.54.14a6 6 0 0 1 0 1.8l-.58.15a2 2 0 0 0-1.44 2.5l.2.68q-.66.58-1.48.91l-.5-.52a2 2 0 0 0-2.9 0l-.5.52a5 5 0 0 1-1.48-.92l.19-.64a2 2 0 0 0-1.45-2.5l-.54-.14a6 6 0 0 1 0-1.8l.58-.15a2 2 0 0 0 1.44-2.5M6.5 19c.8 0 1.45-.67 1.45-1.5S7.3 16 6.5 16s-1.45.67-1.45 1.5S5.7 19 6.5 19',
+        aspect:    'M8 9.44c.3.27.34.74.06 1.05l-.66.76h2.86a.75.75 0 0 1 0 1.5H7.4l.66.76a.75.75 0 0 1-1.12.98l-1.75-2a.75.75 0 0 1 0-.98l1.75-2a.75.75 0 0 1 1.05-.07m7.95 1.05a.75.75 0 0 1 1.13-.98l1.75 2c.25.28.25.7 0 .98l-1.75 2a.75.75 0 0 1-1.13-.98l.66-.76h-2.86a.75.75 0 0 1 0-1.5h2.86zM2 6.25C2 5.01 3 4 4.25 4h15.5C20.99 4 22 5 22 6.25v11.5c0 1.24-1 2.25-2.25 2.25H4.25C3.01 20 2 19 2 17.75zm2.25-.75a.75.75 0 0 0-.75.75v11.5c0 .41.34.75.75.75h15.5c.41 0 .75-.34.75-.75V6.25a.75.75 0 0 0-.75-.75z',
+        speed:     'M6.54 5.48a8.5 8.5 0 0 1 4.71-1.95v1.72a.75.75 0 0 0 1.5 0V3.53a8.5 8.5 0 0 1 7.74 7.97h-1.74a.75.75 0 0 0 0 1.5h1.7a8.5 8.5 0 0 1-3.17 5.67.75.75 0 0 0 .94 1.16A10 10 0 0 0 22 12a10 10 0 1 0-16.23 7.83.75.75 0 0 0 .96-1.16A8.7 8.7 0 0 1 3.56 13h1.69a.75.75 0 0 0 0-1.5H3.51c.11-1.88.84-3.6 1.97-4.96l1.24 1.24a.75.75 0 0 0 1.06-1.06zm10.22 1.15a.65.65 0 0 0-.8.02l-.23.18-4.21 3.6-1.1 1.05c-.66.8-.52 1.98.3 2.62s2.03.5 2.68-.3q.14-.19.32-.5l.46-.8a153 153 0 0 0 2.62-4.85l.13-.24a.6.6 0 0 0-.17-.78',
+        volume:    'M15 4.25a1.25 1.25 0 0 0-2.08-.93L8.42 7.3a.8.8 0 0 1-.49.19H4.25C3.01 7.5 2 8.5 2 9.75v4.5c0 1.24 1 2.25 2.25 2.25h3.68q.28 0 .5.19l4.49 3.99c.8.72 2.08.14 2.08-.93zM9.42 8.43l4.08-3.62v14.38l-4.08-3.63A2.3 2.3 0 0 0 7.93 15H4.25a.75.75 0 0 1-.75-.75v-4.5c0-.42.34-.75.75-.75h3.68c.55 0 1.08-.2 1.5-.57M19 5.9a.75.75 0 0 1 1.05.15 10 10 0 0 1 0 11.9.75.75 0 1 1-1.2-.9 8.5 8.5 0 0 0 0-10.1.75.75 0 0 1 .15-1.05m-1.85 2.47a.75.75 0 0 1 1.02.3 7 7 0 0 1 0 6.66.75.75 0 0 1-1.32-.72 5.5 5.5 0 0 0 0-5.22.75.75 0 0 1 .3-1.02',
+        volumeLow: 'M14.7 3.44q.3.35.3.81v15.5a1.25 1.25 0 0 1-2.06.96L7.98 16.5H4.25c-1.24 0-2.25-1-2.25-2.25v-4.5C2 8.51 3 7.5 4.25 7.5h3.73l4.96-4.2a1.25 1.25 0 0 1 1.76.14M13.5 4.8 8.52 9H4.25a.75.75 0 0 0-.75.75v4.5c0 .41.34.75.75.75h4.27l4.98 4.21zm3.6 3.85a.75.75 0 0 1 1.03.25q.87 1.42.87 3.14t-.87 3.14a.75.75 0 1 1-1.28-.78q.65-1.04.65-2.36t-.65-2.36a.75.75 0 0 1 .25-1.03',
+        mute:      'M12.92 3.32c.8-.72 2.08-.15 2.08.93v15.5a1.25 1.25 0 0 1-2.08.93l-4.5-4a.8.8 0 0 0-.49-.18H4.25C3.01 16.5 2 15.49 2 14.25v-4.5C2 8.5 3 7.5 4.25 7.5h3.68q.28 0 .5-.2zm.58 1.49L9.42 8.43c-.4.37-.94.57-1.49.57H4.25a.75.75 0 0 0-.75.75v4.5c0 .41.34.75.75.75h3.68c.55 0 1.08.2 1.5.56l4.07 3.63zm2.72 4.4c.3-.28.77-.28 1.06 0L19 10.95l1.72-1.72a.75.75 0 1 1 1.06 1.06L20.06 12l1.72 1.72a.75.75 0 0 1-1.06 1.06L19 13.06l-1.72 1.72a.75.75 0 1 1-1.06-1.06L17.94 12l-1.72-1.72a.75.75 0 0 1 0-1.06',
+        info:      'M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20m0 1.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17m0 7c.41 0 .75.34.75.75v5a.75.75 0 0 1-1.5 0v-5c0-.41.34-.75.75-.75M12 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2',
+        settings:  'M12.01 2.25q1.11.01 2.18.25c.32.07.55.33.59.65l.17 1.53a1.38 1.38 0 0 0 1.92 1.11l1.4-.61c.3-.13.64-.06.85.17a10 10 0 0 1 2.2 3.8c.1.3 0 .63-.26.82l-1.25.92a1.38 1.38 0 0 0 0 2.22l1.25.92c.26.19.36.52.27.82a10 10 0 0 1-2.2 3.8.75.75 0 0 1-.85.17l-1.4-.62a1.38 1.38 0 0 0-1.93 1.12l-.17 1.52a.75.75 0 0 1-.58.65 9.5 9.5 0 0 1-4.4 0 .75.75 0 0 1-.57-.65l-.17-1.52a1.38 1.38 0 0 0-1.93-1.11l-1.4.62a.75.75 0 0 1-.85-.18 10 10 0 0 1-2.2-3.8c-.1-.3 0-.63.26-.82l1.25-.92a1.38 1.38 0 0 0 0-2.22l-1.24-.92a.75.75 0 0 1-.28-.82 10 10 0 0 1 2.2-3.8c.23-.23.57-.3.86-.17l1.4.62c.4.17.86.15 1.25-.08.38-.22.63-.6.68-1.04l.17-1.53a.75.75 0 0 1 .58-.65q1.08-.24 2.2-.25m0 1.5q-.67 0-1.35.12l-.11.97a2.9 2.9 0 0 1-4.03 2.33l-.9-.4A8 8 0 0 0 4.29 9.1l.8.59a2.88 2.88 0 0 1 0 4.64l-.8.59a8 8 0 0 0 1.35 2.32l.9-.4a2.88 2.88 0 0 1 4.02 2.32l.1.99q1.35.22 2.7 0l.1-.99a2.88 2.88 0 0 1 4.02-2.32l.9.4a8 8 0 0 0 1.35-2.32l-.8-.59a2.88 2.88 0 0 1 0-4.64l.8-.59a8 8 0 0 0-1.35-2.32l-.9.4q-.55.24-1.15.24c-1.47 0-2.7-1.1-2.86-2.57l-.11-.97q-.68-.11-1.34-.12M12 8.25a3.75 3.75 0 1 1 0 7.5 3.75 3.75 0 0 1 0-7.5m0 1.5a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5',
+        fsEnter:   'M4.5 5.75c0-.69.56-1.25 1.25-1.25h2a.75.75 0 0 0 0-1.5h-2A2.75 2.75 0 0 0 3 5.75v2a.75.75 0 0 0 1.5 0zm0 12.5c0 .69.56 1.25 1.25 1.25h2a.75.75 0 0 1 0 1.5h-2A2.75 2.75 0 0 1 3 18.25v-2a.75.75 0 0 1 1.5 0zM18.25 4.5c.69 0 1.25.56 1.25 1.25v2a.75.75 0 0 0 1.5 0v-2A2.75 2.75 0 0 0 18.25 3h-2a.75.75 0 0 0 0 1.5zm1.25 13.75c0 .69-.56 1.25-1.25 1.25h-2a.75.75 0 0 0 0 1.5h2A2.75 2.75 0 0 0 21 18.25v-2a.75.75 0 0 0-1.5 0z',
+        fsExit:    'M8.5 3.75a.75.75 0 0 0-1.5 0v2.5c0 .41-.34.75-.75.75h-2.5a.75.75 0 0 0 0 1.5h2.5c1.24 0 2.25-1 2.25-2.25zm0 16.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 0-.75-.75h-2.5a.75.75 0 0 1 0-1.5h2.5c1.24 0 2.25 1 2.25 2.25zM16.25 3a.75.75 0 0 0-.75.75v2.5c0 1.24 1 2.25 2.25 2.25h2.5a.75.75 0 0 0 0-1.5h-2.5a.75.75 0 0 1-.75-.75v-2.5a.75.75 0 0 0-.75-.75m-.75 17.25a.75.75 0 0 0 1.5 0v-2.5c0-.41.34-.75.75-.75h2.5a.75.75 0 0 0 0-1.5h-2.5c-1.24 0-2.25 1-2.25 2.25z',
+        cast:      'M2 6.25C2 5.01 3 4 4.25 4h15.5C20.99 4 22 5 22 6.25v11.5c0 1.24-1 2.25-2.25 2.25H4.25C3.01 20 2 19 2 17.75zm2.25-.75a.75.75 0 0 0-.75.75v11.5c0 .41.34.75.75.75h15.5c.41 0 .75-.34.75-.75V6.25a.75.75 0 0 0-.75-.75zM7 16a1 1 0 1 1-2 0 1 1 0 0 1 2 0m-2-3.25c0-.41.33-.75.75-.75 2.34 0 4.24 1.9 4.24 4.25a.75.75 0 0 1-1.5 0 2.75 2.75 0 0 0-2.74-2.75.75.75 0 0 1-.75-.75m0-3c0-.42.33-.76.75-.76 4 0 7.25 3.25 7.25 7.26a.75.75 0 0 1-1.5 0 5.75 5.75 0 0 0-5.75-5.76.75.75 0 0 1-.75-.75',
+        offset:    'M12 5a8.5 8.5 0 1 1 0 17 8.5 8.5 0 0 1 0-17m0 1.5a7 7 0 1 0 0 14 7 7 0 0 0 0-14M12 8c.38 0 .7.28.74.65l.01.1v4.5a.75.75 0 0 1-1.5.1v-4.6c0-.41.34-.75.75-.75m7.15-2.89.08.06 1.16.97a.75.75 0 0 1-.88 1.21l-.08-.06-1.16-.96a.75.75 0 0 1 .88-1.22m-4.9-2.61a.75.75 0 0 1 .1 1.5h-4.6a.75.75 0 0 1-.1-1.5h4.6',
+        dismiss:   'm4.4 4.55.07-.08a.75.75 0 0 1 .98-.07l.08.07L12 10.94l6.47-6.47a.75.75 0 1 1 1.06 1.06L13.06 12l6.47 6.47c.27.27.3.68.07.98l-.07.08a.75.75 0 0 1-.98.07l-.08-.07L12 13.06l-6.47 6.47a.75.75 0 0 1-1.06-1.06L10.94 12 4.47 5.53a.75.75 0 0 1-.07-.98l.07-.08z',
     };
+    // </fluent-icons>
+    function fluentSvg(d) {
+        const paths = Array.isArray(d)
+            ? '<path d="' + d[0] + '"/><path class="vp-glyph__digits" d="' + d[1] + '"/>'
+            : '<path d="' + d + '"/>';
+        return '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"'
+            + ' aria-hidden="true" focusable="false">' + paths + '</svg>';
+    }
+    const I = {};
+    for (const k in ICON_PATHS) I[k] = fluentSvg(ICON_PATHS[k]);
 
     /** Fullscreen action. On the MAUI Android host this ROTATES the device
      *  (YouTube-style): portrait → landscape to "go fullscreen", landscape →
@@ -1534,9 +1552,6 @@
         // `title` attributes give native browser tooltips on hover — required
         // by the icons-only style where the visual label is hidden and the
         // user wouldn't otherwise know what an icon does.
-        // The fwd10 button has a sibling `.vp-icon-text` span containing
-        // literal "+10"; CSS hides the SVG and shows the text only in icons
-        // mode so the action remains readable without a tooltip.
         // Every string comes from the player.* lang pack (t(); English
         // defaults in LABEL_DEFAULTS), key hints appended in brackets.
         const T = (k) => escapeHtml(t(k));
@@ -1582,9 +1597,7 @@
       <div class="vp-hud__cluster vp-hud__cluster--primary">
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="back10"
                 aria-label="${T('hud_back10')}" title="${K('hud_back10', '←')}">
-          <span class="vp-glyph">${I.back10}</span>
-          <span class="vp-icon-text" aria-hidden="true">-10</span>
-          <span class="vp-label">-10 ${T('unit_s')}</span>
+          <span class="vp-glyph">${I.back10}</span><span class="vp-label">-10 ${T('unit_s')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="prev"
                 aria-label="${T('hud_prev')}" title="${K('hud_prev', '◄◄')}">
@@ -1601,9 +1614,7 @@
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="fwd10"
                 aria-label="${T('hud_fwd10')}" title="${K('hud_fwd10', '→')}">
-          <span class="vp-glyph">${I.fwd10}</span>
-          <span class="vp-icon-text" aria-hidden="true">+10</span>
-          <span class="vp-label">+10 ${T('unit_s')}</span>
+          <span class="vp-glyph">${I.fwd10}</span><span class="vp-label">+10 ${T('unit_s')}</span>
         </button>
       </div>
       <div class="vp-hud__cluster vp-hud__cluster--secondary">
@@ -1634,27 +1645,19 @@
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="offset"
                 aria-label="${T('hud_sync')}" title="${T('hud_sync')}"
                 data-bind="offset-btn">
-          <span class="vp-glyph">${I.offset}</span>
-          <span class="vp-icon-text" aria-hidden="true">AS</span>
-          <span class="vp-label">${T('hud_sync_short')}</span>
+          <span class="vp-glyph">${I.offset}</span><span class="vp-label">${T('hud_sync_short')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="audio"
                 aria-label="${T('hud_audio')}" title="${T('hud_audio')}">
-          <span class="vp-glyph">${I.audio}</span>
-          <span class="vp-icon-text" aria-hidden="true">AT</span>
-          <span class="vp-label">${T('hud_audio_short')}</span>
+          <span class="vp-glyph">${I.audio}</span><span class="vp-label">${T('hud_audio_short')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="cc"
                 aria-label="${T('subtitles')}" title="${T('subtitles')}">
-          <span class="vp-glyph">${I.cc}</span>
-          <span class="vp-icon-text" aria-hidden="true">CC</span>
-          <span class="vp-label">${T('subtitles')}</span>
+          <span class="vp-glyph">${I.cc}</span><span class="vp-label">${T('subtitles')}</span>
         </button>
         <button class="vp-btn vp-btn--g vp-btn--tv" data-act="info"
                 aria-label="${T('hud_info')}" title="${T('hud_info_hint')}">
-          <span class="vp-glyph">${I.info}</span>
-          <span class="vp-icon-text" aria-hidden="true">i</span>
-          <span class="vp-label">${T('hud_info_short')}</span>
+          <span class="vp-glyph">${I.info}</span><span class="vp-label">${T('hud_info_short')}</span>
         </button>
       </div>
       <button class="vp-btn vp-btn--g vp-btn--tv vp-hud__gear" data-act="settings"
@@ -1692,7 +1695,10 @@
         popup.className = 'vp-hud-popup vp-hud-popup--menu';
         popup.setAttribute('data-anchor', anchor);
         const menuList = popupShell(popup, title);
-        rows.forEach((r, i) => popupRow(menuList, r.label, i));
+        rows.forEach((r, i) => {
+            const b = popupRow(menuList, r.label, i);
+            if (r.icon) b.insertAdjacentHTML('afterbegin', r.icon);   // the HUD button's own glyph
+        });
         popup.addEventListener('click', (e) => {
             const it = e.target.closest('[data-i]');
             if (!it) return;
@@ -2380,6 +2386,7 @@
                 { act: 'cast',    label: t('hud_cast'),  run: callbacks.cast },
                 { act: 'info',    label: t('hud_info'),  run: callbacks.info },
             ].filter(r => !hidden(r.act) && typeof r.run === 'function');
+            rows.forEach(r => { r.icon = r.act === 'volume' ? refs.volumeIcon.innerHTML : I[r.act]; });
             openMenuPopup(root, 'settings', t('hud_settings'), rows);
         }
 
@@ -2849,13 +2856,13 @@
         const upNextEl = document.createElement('div');
         upNextEl.className = 'vp-upnext vp-upnext--hidden';
         upNextEl.innerHTML = `
-            <button type="button" class="vp-upnext__close tv-focus" data-act="un-dismiss" aria-label="${escapeHtml(t('up_next_dismiss'))}">&times;</button>
+            <button type="button" class="vp-upnext__close tv-focus" data-act="un-dismiss" aria-label="${escapeHtml(t('up_next_dismiss'))}">${I.dismiss}</button>
             <div class="vp-upnext__eyebrow" data-bind="un-eyebrow"></div>
             <div class="vp-upnext__name" data-bind="un-name"></div>
             <div class="vp-upnext__actions">
               <button type="button" class="vp-upnext__btn vp-upnext__btn--skip tv-focus" data-act="un-skip" data-bind="un-skip">${escapeHtml(t('skip_credits'))}</button>
               <button type="button" class="vp-upnext__btn vp-upnext__btn--play tv-focus" data-act="un-next">
-                <span data-bind="un-play">${escapeHtml(t('up_next_play'))}</span>
+                ${I.play}<span data-bind="un-play">${escapeHtml(t('up_next_play'))}</span>
               </button>
             </div>`;
         root.appendChild(upNextEl);
@@ -3139,7 +3146,8 @@
                 refs.castBtn.style.display = on ? '' : 'none';
             },
             setVolumeIcon(volume, muted) {
-                refs.volumeIcon.innerHTML = (muted || volume === 0) ? I.mute : I.volume;
+                refs.volumeIcon.innerHTML = (muted || volume === 0) ? I.mute
+                    : volume < 0.5 ? I.volumeLow : I.volume;
             },
             // Hide prev / next when no adjacent episode exists on disk (movie,
             // first / last episode). Driven from setMediaSession's prev/next
