@@ -61,8 +61,12 @@
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
                         <Label Grid.Column="0" x:Name="PositionLabel" Text="0:00" TextColor="White"
                                FontFamily="sans-serif" FontSize="13" VerticalOptions="Center" />
-                        <ProgressBar Grid.Column="1" x:Name="Scrubber" Progress="0"
-                                     ProgressColor="#bb5000" VerticalOptions="Center" />
+                        <!-- seek bar + chapter ticks (laid out in code-behind) -->
+                        <Grid Grid.Column="1" VerticalOptions="Center" HeightRequest="14">
+                            <ProgressBar x:Name="Scrubber" Progress="0"
+                                         ProgressColor="#bb5000" VerticalOptions="Center" />
+                            <AbsoluteLayout x:Name="ChapterMarks" InputTransparent="True" />
+                        </Grid>
                         <Label Grid.Column="2" x:Name="DurationLabel" Text="0:00" TextColor="#d6d6d6"
                                FontFamily="sans-serif" FontSize="13" VerticalOptions="Center" />
                     </Grid>

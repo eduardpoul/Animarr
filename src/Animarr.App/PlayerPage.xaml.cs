@@ -120,6 +120,10 @@ public partial class PlayerPage : ContentPage
         PrevFocus.Command      = new Command(() => GoAdjacentEpisode(-1));
         PlayPauseFocus.Command = new Command(TogglePlay);
         NextFocus.Command      = new Command(() => GoAdjacentEpisode(+1));
+        // Held OK on ⏮ / ⏭: chapters (the episode when the file has none).
+        PrevFocus.LongCommand  = new Command(() => { if (!GoChapter(-1)) GoAdjacentEpisode(-1); });
+        NextFocus.LongCommand  = new Command(() => { if (!GoChapter(+1)) GoAdjacentEpisode(+1); });
+        ChapterMarks.SizeChanged += (_, _) => PaintChapterMarks();
         SeekFwdFocus.Command   = new Command(() => SeekBy(+10_000));
         SkipFocus.Command      = new Command(DoSkip);
         VolumeFocus.Command    = new Command(OpenVolumeSheet);
@@ -830,6 +834,8 @@ public partial class PlayerPage : ContentPage
         _directPlayable = null;
         NativePlayerService.Instance?.SetFrameRateHint(0);   // the new file's comes with its probe
         NativePlayerService.Instance?.SetContentAspect(0);
+        _chapters = new();
+        ChapterMarks.Children.Clear();
         return _catalogTask = LoadCatalogAsync(_filePath);
     }
 
@@ -837,6 +843,7 @@ public partial class PlayerPage : ContentPage
     {
         var p = Uri.EscapeDataString(path);
         var probeTask = _http.GetStringAsync($"/api/probe?path={p}");
+        _ = LoadChaptersAsync(path);   // ticks + chapter steps, in parallel
         var extTask = _http.GetFromJsonAsync<List<ExternalTrackDto>>($"{ApiRoutes.ExternalTracks}?path={p}", Json);
         List<ProbeTrack> audio = new(), subs = new();
         bool ok = false;
@@ -1759,6 +1766,61 @@ public partial class PlayerPage : ContentPage
         _ = StartStreamAsync(resume, 0, playWhenReady: true);
     }
 
+    // ── Chapters ────────────────────────────────────────────────────────────
+    // /api/chapters: ticks on the seek bar, and a held OK on ⏮ / ⏭ steps to
+    // the previous / next chapter (⏮ goes to the start of the current one
+    // when more than 3 s in). A file without chapters keeps ⏮ / ⏭ as they are.
+
+    private List<ChapterDto> _chapters = new();
+
+    private async Task LoadChaptersAsync(string path)
+    {
+        List<ChapterDto> list = new();
+        try { list = await _http.GetFromJsonAsync<List<ChapterDto>>($"/api/chapters?path={Uri.EscapeDataString(path)}", Json) ?? new(); }
+        catch (Exception ex) { Log($"chapters: {ex.Message}"); }
+        if (list.Count == 0 && Bench.BenchLog.Has("fakechapters"))
+        {
+            // Bench: the test library has no chaptered file — 30 s chapters.
+            for (int i = 0; i < 6; i++) list.Add(new ChapterDto(i, $"Тест {i + 1}", i * 30, (i + 1) * 30));
+        }
+        if (path != _filePath || _closed) return;
+        _chapters = list;
+        Log($"chapters: {list.Count}");
+        PaintChapterMarks();
+    }
+
+    private void PaintChapterMarks()
+    {
+        ChapterMarks.Children.Clear();
+        double w = ChapterMarks.Width, dur = _durationMs / 1000.0;
+        if (_chapters.Count < 2 || w <= 0 || dur <= 0) return;
+        foreach (var c in _chapters.Skip(1))
+        {
+            if (c.StartSec <= 0 || c.StartSec >= dur) continue;
+            var tick = new BoxView { Color = Color.FromArgb("#E6FFFFFF"), WidthRequest = 2, HeightRequest = 12 };
+            AbsoluteLayout.SetLayoutBounds(tick, new Rect(w * c.StartSec / dur - 1, 1, 2, 12));
+            ChapterMarks.Children.Add(tick);
+        }
+    }
+
+    /// <summary>Seek to the next (+1) / previous (-1) chapter; false when the
+    /// file has none (the caller falls back to the episode).</summary>
+    private bool GoChapter(int delta)
+    {
+        if (_chapters.Count < 2 || NativePlayerService.Instance?.GetState() is not { } st) return false;
+        double pos = (_pendingSeekMs ?? _streamBaseMs + st.PositionMs) / 1000.0;
+        int cur = _chapters.FindLastIndex(c => c.StartSec <= pos + 0.5);
+        if (cur < 0) cur = 0;
+        int target = delta > 0 ? cur + 1 : pos - _chapters[cur].StartSec > 3 ? cur : cur - 1;
+        if (target < 0) target = 0;
+        if (target >= _chapters.Count) { FlashInfo("Это последняя глава"); return true; }
+        var ch = _chapters[target];
+        SeekToAbs((long)(ch.StartSec * 1000));
+        FlashInfo($"Глава {target + 1} из {_chapters.Count}{(string.IsNullOrWhiteSpace(ch.Title) ? "" : $": {ch.Title}")}");
+        Log($"chapter {target + 1}/{_chapters.Count} at {ch.StartSec:0.#} s");
+        return true;
+    }
+
     // ── Up Next ─────────────────────────────────────────────────────────────
     // Like the web player: the next episode is offered from the detected
     // credits start (else 95 % of the runtime). The card announces itself on
@@ -1962,6 +2024,7 @@ public partial class PlayerPage : ContentPage
         PlayPauseIcon.Text  = st.PlayWhenReady ? "❚❚" : "▶";
         BufferSpinner.IsVisible = st.Buffering;
 
+        if (dur > 0 && Math.Abs(dur - _ticksDurationMs) > 1000) { _ticksDurationMs = dur; Dispatcher.Dispatch(PaintChapterMarks); }
         if (dur > 0 && _pendingSeekMs is null)
         {
             Scrubber.Progress = Math.Clamp((double)absPos / dur, 0, 1);
@@ -2010,6 +2073,7 @@ public partial class PlayerPage : ContentPage
     // towards -16 LUFS; the player applies it for whatever track plays now
     // (an embedded one, or a dub file as its own track 0).
 
+    private long _ticksDurationMs;
     private string? _loudnessKey;
     private DateTime _loudnessRetryUtc;
 
