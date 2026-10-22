@@ -378,6 +378,7 @@ public partial class PlayerPage : ContentPage
         _started = true;
         AttachSurface();
         StartMediaSession();
+        _ = LoadLevellingAsync();
         _ = StartAsync();
         _ = ResolveAdjacentAsync();
         StartTimer();
@@ -2301,19 +2302,23 @@ public partial class PlayerPage : ContentPage
             _          => $"{c.Plan}{(c.Reasons is { Count: > 0 } r ? $" ({string.Join(",", r)})" : "")}",
         }));
 
-    // ── Loudness levelling (device setting, off by default) ─────────────────
+    // ── Loudness levelling (a server setting, off by default) ──────────────
     // The server measures each track's EBU R128 loudness once (in the
     // background — "pending" is asked again later) and suggests a gain
     // towards -16 LUFS; the player applies it for whatever track plays now
     // (an embedded one, or a dub file as its own track 0).
 
     private long _ticksDurationMs;
+    /// <summary>The server's loudness levelling setting (one for the whole
+    /// server, off by default; /api/me/preferences reports it as
+    /// normalizeVolume), read when the player opens.</summary>
+    private bool _normalizeVolume;
     private string? _loudnessKey;
     private DateTime _loudnessRetryUtc;
 
     private void UpdateLoudness()
     {
-        if (!TvPlaybackPrefs.NormalizeLoudness)
+        if (!_normalizeVolume)
         {
             if (_loudnessKey is not null) { _loudnessKey = null; NativePlayerService.Instance?.SetLoudnessGain(0); }
             return;
@@ -2329,6 +2334,16 @@ public partial class PlayerPage : ContentPage
         _loudnessRetryUtc = DateTime.UtcNow.AddSeconds(30);   // in flight / pending → ask again later
         if (changed) NativePlayerService.Instance?.SetLoudnessGain(0);   // nothing stale meanwhile
         _ = LoadLoudnessAsync(key, path, track);
+    }
+
+    private async Task LoadLevellingAsync()
+    {
+        try
+        {
+            _normalizeVolume = (await _api.GetMyPreferencesAsync()).NormalizeVolume;
+            Log($"loudness levelling (server setting): {(_normalizeVolume ? "on" : "off")}");
+        }
+        catch (Exception ex) { Log($"preferences: {ex.Message}"); }
     }
 
     private async Task LoadLoudnessAsync(string key, string path, int track)

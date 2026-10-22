@@ -11,7 +11,6 @@ internal static class TvPlaybackPrefs
     private const string PassthroughKey = "player_passthrough";
     private const string SpeedKey = "player_speed";
     private const string SubSizeKey = "player_sub_size";
-    private const string LoudnessKey = "player_normalize";
     private const string SubBgKey = "player_sub_bg";
 
     /// <summary>Switch the display to the video's frame rate (24 / 25 / 50 Hz…)
@@ -47,14 +46,6 @@ internal static class TvPlaybackPrefs
     {
         get => Math.Clamp(Preferences.Default.Get(SubBgKey, 0), 0, 2);
         set => Preferences.Default.Set(SubBgKey, Math.Clamp(value, 0, 2));
-    }
-
-    /// <summary>Level the loudness of every track towards -16 LUFS with the
-    /// server's measured gain (/api/loudness). Off by default.</summary>
-    public static bool NormalizeLoudness
-    {
-        get => Preferences.Default.Get(LoudnessKey, false);
-        set => Preferences.Default.Set(LoudnessKey, value);
     }
 
     /// <summary>Playback speed, 0.5–2× (1 = normal); kept for the next video.</summary>

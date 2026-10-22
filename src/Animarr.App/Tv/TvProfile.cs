@@ -61,7 +61,7 @@ internal sealed class TvProfileView : Android.Widget.ScrollView
     private readonly LinearLayout _profiles;
     private readonly LinearLayout _folders;
     private readonly TextView _status, _defaultHint;
-    private readonly TextView _defaultBtn, _langBtn, _scaleBtn, _fpsBtn, _passBtn, _loudBtn;
+    private readonly TextView _defaultBtn, _langBtn, _scaleBtn, _fpsBtn, _passBtn;
     private DeviceStateDto? _device;
     private string _lang = "ru";
 
@@ -131,22 +131,17 @@ internal sealed class TvProfileView : Android.Widget.ScrollView
         _passBtn = TvUi.Button(ctx, "…", false, TogglePassthrough, sp: 15);
         pb.AddView(_fpsBtn, TvUi.Lp(-2, TvUi.Dp(ctx, 44)));
         pb.AddView(_passBtn, TvUi.Lp(-2, TvUi.Dp(ctx, 44), TvUi.Dp(ctx, 12)));
-        _loudBtn = TvUi.Button(ctx, "…", false, ToggleLoudness, sp: 15);
-        pb.AddView(_loudBtn, TvUi.Lp(-2, TvUi.Dp(ctx, 44), TvUi.Dp(ctx, 12)));
         // The server remembers the streams this device's decoders failed on
         // (and plays them another way since): forget that, e.g. after a
         // firmware update.
-        var pb2 = Buttons();
-        pb2.AddView(TvUi.Button(ctx, TvL.T("tv.reset_failures", "Сбросить ошибки воспроизведения", "Reset playback failures"),
-            false, () => _ = ResetFailuresAsync(), sp: 15), TvUi.Lp(-2, TvUi.Dp(ctx, 44)));
+        pb.AddView(TvUi.Button(ctx, TvL.T("tv.reset_failures", "Сбросить ошибки воспроизведения", "Reset playback failures"),
+            false, () => _ = ResetFailuresAsync(), sp: 15), TvUi.Lp(-2, TvUi.Dp(ctx, 44), TvUi.Dp(ctx, 12)));
         _col.AddView(TvUi.Text_(ctx, 13, TvUi.TextFaint, TvUi.Regular, 6,
             TvL.T("tv.playback_hint",
                 "Частота кадров: экран переключается на частоту видео (24 / 25 / 50 Гц) — движение плавнее, но при запуске и смене серии экран гаснет на 1–2 с.\n" +
-                "Передача звука: «Авто» отправляет AC-3 / E-AC-3 / DTS на ресивер или саундбар как есть, если он их принимает; «Выкл» — всё декодируется в PCM на устройстве.\n" +
-                "Выравнивать громкость: тихие и громкие серии и озвучки звучат одинаково (сервер измеряет громкость каждой дорожки).",
+                "Передача звука: «Авто» отправляет AC-3 / E-AC-3 / DTS на ресивер или саундбар как есть, если он их принимает; «Выкл» — всё декодируется в PCM на устройстве.",
                 "Frame rate: the display switches to the video's rate (24 / 25 / 50 Hz) — smoother motion, but the screen blanks for 1–2 s at start and between episodes.\n" +
-                "Audio passthrough: \"Auto\" sends AC-3 / E-AC-3 / DTS to the receiver or soundbar as they are when it takes them; \"Off\" decodes everything to PCM on the device.\n" +
-                "Level loudness: quiet and loud episodes and dubs play at the same level (the server measures every track).")),
+                "Audio passthrough: \"Auto\" sends AC-3 / E-AC-3 / DTS to the receiver or soundbar as they are when it takes them; \"Off\" decodes everything to PCM on the device.")),
             TvUi.Lp(-1, -2, 0, TvUi.Dp(ctx, 10)));
         PaintPlayback();
 
@@ -400,19 +395,11 @@ internal sealed class TvProfileView : Android.Widget.ScrollView
                        (Services.TvPlaybackPrefs.MatchFrameRate ? TvL.T("common.on", "Вкл.", "On") : TvL.T("common.off", "Выкл.", "Off"));
         _passBtn.Text = TvL.T("tv.passthrough", "Передача звука (passthrough)", "Audio passthrough") + ":  " +
                         (Services.TvPlaybackPrefs.PassthroughOff ? TvL.T("common.off", "Выкл.", "Off") : TvL.T("tv.auto", "Авто", "Auto"));
-        _loudBtn.Text = TvL.T("tv.normalize", "Выравнивать громкость", "Level loudness") + ":  " +
-                        (Services.TvPlaybackPrefs.NormalizeLoudness ? TvL.T("common.on", "Вкл.", "On") : TvL.T("common.off", "Выкл.", "Off"));
     }
 
     private void ToggleFrameRate()
     {
         Services.TvPlaybackPrefs.MatchFrameRate = !Services.TvPlaybackPrefs.MatchFrameRate;
-        PaintPlayback();
-    }
-
-    private void ToggleLoudness()
-    {
-        Services.TvPlaybackPrefs.NormalizeLoudness = !Services.TvPlaybackPrefs.NormalizeLoudness;
         PaintPlayback();
     }
 
