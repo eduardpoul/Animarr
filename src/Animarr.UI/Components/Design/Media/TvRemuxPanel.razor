@@ -1,0 +1,292 @@
+@*
+    "Optimize for TV" for one title (admins only — the endpoints are
+    SystemSettings-gated). Shows GET /api/media/{id}/tv-remux: which of the
+    title's videos a TV's player handles badly (M2TS / WMV containers,
+    Matroska without a Cues index or with compressed tracks) and the state of
+    each one's remuxed copy; "Run" queues the remux (POST → 202, 409
+    code "disabled" while playback.tv_remux_enabled is off), "Delete copies"
+    removes the copies (DELETE → {deleted}). Polls while anything is queued or
+    running. The host page draws the card and its heading.
+*@
+@implements IDisposable
+@inject HttpClient Http
+
+<div class="tvr">
+    <p class="tvr__desc">@L["tv_remux.desc"]</p>
+
+    @if (_status is null)
+    {
+        <p class="tvr__line">@(_loadFailed ? L["tv_remux.err_load"] : L["tv_remux.checking"])</p>
+    }
+    else
+    {
+        var files    = _status.Files ?? Array.Empty<RemuxFile>();
+        var listed   = files.Where(f => f.Status != "not_needed").ToList();
+        var needed   = files.Count(f => f.Status is "needed" or "failed" or "skipped");
+        var working  = files.Count(f => f.Status is "queued" or "running");
+        var done     = files.Where(f => f.Status == "done").ToList();
+        var doneSize = done.Sum(f => f.CopySizeBytes ?? 0);
+
+        @if (listed.Count == 0)
+        {
+            <p class="tvr__line">@L.Get("tv_remux.summary_none", files.Length)</p>
+        }
+        else
+        {
+            <p class="tvr__line">
+                @if (needed > 0)  { <span>@L.Get("tv_remux.summary_needed", needed, files.Length)</span> }
+                @if (working > 0) { <span>@L.Get("tv_remux.summary_working", working)</span> }
+                @if (done.Count > 0) { <span>@L.Get("tv_remux.summary_done", done.Count, Size(doneSize))</span> }
+            </p>
+        }
+
+        @if (!_status.Enabled && (needed > 0 || working > 0))
+        {
+            <p class="fs-msgbar fs-msgbar--warn tvr__msg">
+                @L["tv_remux.disabled_note"]
+                <a class="tvr__link" href="settings?section=player">@L["tv_remux.open_settings"]</a>
+            </p>
+        }
+
+        @if (listed.Count > 0)
+        {
+            var shown = _showAll ? listed : listed.Take(MaxRows).ToList();
+            <ul class="tvr__list">
+                @foreach (var f in shown)
+                {
+                    <li class="tvr__row">
+                        <div class="tvr__row-head">
+                            <span class="tvr__name" title="@f.Path">@FileName(f.Path)</span>
+                            <Pill Dense="true" Tone="@StatusTone(f.Status)">@StatusLabel(f.Status)</Pill>
+                        </div>
+                        @{ var meta = Meta(f); }
+                        @if (meta.Length > 0)
+                        {
+                            <div class="tvr__meta">@meta</div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(f.Error))
+                        {
+                            <div class="tvr__err" title="@f.Error">@f.Error</div>
+                        }
+                    </li>
+                }
+            </ul>
+            @if (listed.Count > MaxRows)
+            {
+                <button type="button" class="tvr__more" @onclick="@(() => _showAll = !_showAll)">
+                    @(_showAll ? L["tv_remux.show_less"] : L.Get("tv_remux.show_all", listed.Count))
+                </button>
+            }
+        }
+
+        @if (_message is not null)
+        {
+            <p class="fs-msgbar @(_messageIsError ? "fs-msgbar--error" : "fs-msgbar--info") tvr__msg">@_message</p>
+        }
+
+        @if (needed > 0 || done.Count > 0)
+        {
+            <div class="tvr__actions">
+                @if (needed > 0)
+                {
+                    <Btn Variant="primary" Size="md" Loading="@_busyRun" Disabled="@(!_status.Enabled || _busyDelete)"
+                         title="@(_status.Enabled ? null : L["tv_remux.disabled_note"])"
+                         OnClick="RunAsync">
+                        @if (!_busyRun) { <DIcon Name="tv" Size="16" /> }
+                        @L["tv_remux.btn_run"]
+                    </Btn>
+                }
+                @if (done.Count > 0)
+                {
+                    <Btn Variant="ghost" Size="md" Loading="@_busyDelete" Disabled="@_busyRun" OnClick="DeleteAsync">
+                        @if (!_busyDelete) { <DIcon Name="trash" Size="16" /> }
+                        @L["tv_remux.btn_delete"]
+                    </Btn>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid MediaItemId { get; set; }
+
+    private const int MaxRows = 8;
+    private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(3);
+
+    private sealed record RemuxStatus(bool Enabled, RemuxFile[]? Files);
+    private sealed record RemuxFile(string Path, string[]? Reasons, string Status,
+        string? CopyPath, long? CopySizeBytes, string? Error);
+    private sealed record DeleteResult(int Deleted);
+    private sealed record Problem(string? Code, string? Detail);
+
+    private Guid _loadedId;
+    private RemuxStatus? _status;
+    private bool _loadFailed;
+    private bool _showAll;
+    private bool _busyRun;
+    private bool _busyDelete;
+    private string? _message;
+    private bool _messageIsError;
+    private CancellationTokenSource? _cts;
+
+    private string Route => $"api/media/{MediaItemId}/tv-remux";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (MediaItemId == _loadedId) return;
+        _loadedId = MediaItemId;
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        _status = null; _loadFailed = false; _showAll = false; _message = null;
+        await LoadAsync(_cts.Token);
+    }
+
+    private async Task LoadAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var res = await Http.GetAsync(Route, ct);
+            if (!res.IsSuccessStatusCode) { _loadFailed = _status is null; return; }
+            Apply(await res.Content.ReadFromJsonAsync<RemuxStatus>(ct));
+        }
+        catch (OperationCanceledException) { }
+        catch { _loadFailed = _status is null; }
+    }
+
+    /// <summary>Take a fresh state and keep polling while a job is queued or
+    /// running (one loop per component; it stops by itself once idle).</summary>
+    private void Apply(RemuxStatus? status)
+    {
+        if (status is null) return;
+        _status = status;
+        _loadFailed = false;
+        if (Busy(status) && _cts is { } cts && _pollingFor != cts) _ = PollAsync(cts);
+    }
+
+    private static bool Busy(RemuxStatus s) => (s.Files ?? []).Any(f => f.Status is "queued" or "running");
+
+    // The load generation (_cts) a poll loop runs for — a title switch starts
+    // a new generation, so its poll doesn't wait for the old loop to unwind.
+    private CancellationTokenSource? _pollingFor;
+    private async Task PollAsync(CancellationTokenSource cts)
+    {
+        _pollingFor = cts;
+        var ct = cts.Token;
+        try
+        {
+            while (!ct.IsCancellationRequested && _status is { } s && Busy(s))
+            {
+                await Task.Delay(PollEvery, ct);
+                await LoadAsync(ct);
+                if (!ct.IsCancellationRequested) await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally { if (_pollingFor == cts) _pollingFor = null; }
+    }
+
+    private async Task RunAsync()
+    {
+        if (_busyRun || _cts is null) return;
+        _busyRun = true; _message = null;
+        var ct = _cts.Token;     // this title's generation: a title switch cancels it
+        var route = Route;
+        try
+        {
+            using var res = await Http.PostAsync(route, null, ct);
+            if (res.IsSuccessStatusCode)
+                Apply(await res.Content.ReadFromJsonAsync<RemuxStatus>(ct));
+            else if ((int)res.StatusCode == 409)
+            {
+                var p = await ReadProblemAsync(res);
+                Fail(p?.Code == "disabled" ? L["tv_remux.err_disabled"] : (p?.Detail ?? res.ReasonPhrase ?? "409"));
+                await LoadAsync(ct);   // the toggle moved meanwhile — show it
+            }
+            else
+                Fail(L.Get("tv_remux.err_action", (int)res.StatusCode));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Fail(L.Get("tv_remux.err_action", ex.Message)); }
+        finally { _busyRun = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_busyDelete || _cts is null) return;
+        _busyDelete = true; _message = null;
+        var ct = _cts.Token;
+        var route = Route;
+        try
+        {
+            using var res = await Http.DeleteAsync(route, ct);
+            if (res.IsSuccessStatusCode)
+            {
+                var r = await res.Content.ReadFromJsonAsync<DeleteResult>(ct);
+                _message = L.Get("tv_remux.deleted_fmt", r?.Deleted ?? 0);
+                _messageIsError = false;
+                await LoadAsync(ct);
+            }
+            else
+                Fail(L.Get("tv_remux.err_action", (int)res.StatusCode));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Fail(L.Get("tv_remux.err_action", ex.Message)); }
+        finally { _busyDelete = false; }
+    }
+
+    private void Fail(string text) { _message = text; _messageIsError = true; }
+
+    private static async Task<Problem?> ReadProblemAsync(HttpResponseMessage res)
+    {
+        try { return await res.Content.ReadFromJsonAsync<Problem>(); }
+        catch { return null; }
+    }
+
+    private static string FileName(string path)
+    {
+        var i = Math.Max(path.LastIndexOf('/'), path.LastIndexOf('\\'));
+        return i >= 0 ? path[(i + 1)..] : path;
+    }
+
+    private string Meta(RemuxFile f)
+    {
+        var parts = (f.Reasons ?? []).Select(r => Known("tv_remux.reason_" + r, r)).ToList();
+        if (f.CopySizeBytes is > 0) parts.Add(L.Get("tv_remux.copy_size", Size(f.CopySizeBytes.Value)));
+        return string.Join(" · ", parts);
+    }
+
+    private string Size(long bytes)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return bytes >= 1_073_741_824
+            ? L.Get("common.size_gb_fmt", (bytes / 1_073_741_824.0).ToString("0.0", inv))
+            : L.Get("common.size_mb_fmt", Math.Max(1, (long)Math.Round(bytes / 1_048_576.0)).ToString(inv));
+    }
+
+    private string StatusLabel(string status) => Known("tv_remux.status_" + status, status);
+
+    /// <summary>The string for a server code, or the code itself when this
+    /// build has no string for it (the indexer echoes a missing key).</summary>
+    private string Known(string key, string fallback)
+    {
+        var v = L[key];
+        return v == key ? fallback : v;
+    }
+
+    private static string StatusTone(string status) => status switch
+    {
+        "done"              => "success",
+        "running"           => "accent",
+        "queued"            => "info",
+        "needed" or "failed" => "warn",
+        _                   => "default",
+    };
+
+    public void Dispose()
+    {
+        try { _cts?.Cancel(); _cts?.Dispose(); } catch { }
+        _cts = null;
+    }
+}

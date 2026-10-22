@@ -498,6 +498,16 @@ else
                     </div>
                 }
             </section>
+
+            @* "Optimize for TV" (opt-in remux of files a TV handles badly) —
+               admin-only, like its endpoints and the server switch. *@
+            @if (CanCurate)
+            {
+                <section class="md-card md-tvremux">
+                    <h2 class="md-h2">@L["tv_remux.title"]</h2>
+                    <TvRemuxPanel MediaItemId="@item.Id" />
+                </section>
+            }
         </aside>
     </div>
 
