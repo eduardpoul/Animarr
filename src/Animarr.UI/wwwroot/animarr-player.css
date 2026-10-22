@@ -776,11 +776,11 @@ html:has(.vp-backdrop) { overflow: hidden; }
    Touch / phone layout — activated by [data-touch="1"] on the HUD (set in
    attachHud for a coarse pointer OR a narrow viewport, never on the Android-TV
    host, which needs the full d-pad button bar). Strips the bottom bar to:
-   scrubber, then prev/next on the LEFT and a settings gear + fullscreen on the
+   scrubber, then prev/next on the LEFT and the overflow (⋮) menu + fullscreen on the
    RIGHT. Play moves to a big centre overlay; ±10 becomes a double-tap on the
    left/right thirds (handled in JS, ripple below). The secondary controls
    (quality, aspect, cast, sync, audio, subtitles, info, volume) all move into
-   the gear menu.
+   the overflow menu.
    ───────────────────────────────────────────────────────────────────── */
 
 /* Gear + centre play are hidden on the default (desktop / TV) layout. */

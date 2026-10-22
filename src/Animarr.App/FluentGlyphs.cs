@@ -40,4 +40,5 @@ public static class FluentGlyphs
     public const string Dismiss             = "\uE01A";   // dismiss_24_regular
     public const string OpenExternal        = "\uE01B";   // open_24_regular
     public const string Globe               = "\uE01C";   // globe_24_regular
+    public const string More                = "\uE01D";   // more_vertical_24_regular
 }

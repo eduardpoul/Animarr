@@ -17,15 +17,16 @@ namespace Animarr.App;
 ///     tap on the left / right third seeks -10 / +10 s (each further tap in
 ///     the streak another 10 s), the middle toggles play / pause;
 ///   • ⏮ / big ▶❚❚ / ⏭ in the middle, a draggable seek bar with chapter
-///     ticks, CC, picture-in-picture and a ⚙ sheet (audio, subtitles,
-///     quality, aspect, speed, ⓘ, an external player, the web player);
+///     ticks, picture-in-picture and an overflow ⋮ sheet with every
+///     secondary control (audio, subtitles, quality, aspect, speed, ⓘ, an
+///     external player, the web player);
 ///   • picture-in-picture on its button and on Home (auto-enter on Android
 ///     12+, OnUserLeaveHint below), with ⏪ / ▶❚❚ / ⏩ in the PiP window;
 ///   • a MediaStyle notification on the player's MediaSession — lock screen,
 ///     shade and quick-settings controls;
 ///   • the web player stays the fallback: a start that never got to play
 ///     closes the page with "failed" and the WebView plays the file itself;
-///     ⚙ → "Смотреть в веб-плеере" hands back with "web".
+///     ⋮ → "Смотреть в веб-плеере" hands back with "web".
 /// </summary>
 public partial class PlayerPage
 {
@@ -60,8 +61,10 @@ public partial class PlayerPage
         _handOffPath = _filePath;
         TouchLayer.IsVisible = true;
         CenterControls.IsVisible = true;
+        // The secondary controls live in the ⋮ sheet (subtitles included).
         foreach (var v in new View[] { SeekBackButton, PrevButton, PlayPauseButton, NextButton, SeekFwdButton,
-                                       SpeedButton, VolumeButton, AudioButton, QualityButton, AspectButton, InfoButton })
+                                       SpeedButton, VolumeButton, AudioButton, SubsButton, QualityButton, AspectButton,
+                                       InfoButton })
             v.IsVisible = false;
         PipButton.IsVisible = OperatingSystem.IsAndroidVersionAtLeast(26);
         GearButton.IsVisible = true;
@@ -81,8 +84,7 @@ public partial class PlayerPage
         UpNextCard.WidthRequest = 360;
         UpNextHint.IsVisible = false;
         SheetCard.Padding = new Thickness(18, 14);
-        SubsButton.WidthRequest = 52;
-        foreach (var b in new[] { SubsButton, SkipButton }) b.HeightRequest = 44;
+        SkipButton.HeightRequest = 44;
 
         CenterPlayFocus.Command = new Command(() => { TogglePlay(); ArmAutoHide(); });
         CenterPrevFocus.Command = new Command(() => GoAdjacentEpisode(-1));
@@ -448,7 +450,7 @@ public partial class PlayerPage
         SeekHintLeft.IsVisible = SeekHintRight.IsVisible = false;
     }
 
-    // ── ⚙ sheet ──────────────────────────────────────────────────────────────
+    // ── ⋮ sheet ──────────────────────────────────────────────────────────────
 
     private void OpenGearSheet()
     {
@@ -488,7 +490,7 @@ public partial class PlayerPage
         _               => a,
     };
 
-    /// <summary>⚙ → the web player (ASS styling by JASSUB, PGS, …) for this
+    /// <summary>⋮ → the web player (ASS styling by JASSUB, PGS, …) for this
     /// file, from where it was left — the progress is saved first.</summary>
     private async Task SwitchToWebPlayerAsync()
     {

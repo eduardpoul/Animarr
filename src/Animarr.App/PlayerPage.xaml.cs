@@ -2495,7 +2495,7 @@ public partial class PlayerPage : ContentPage
     /// <param name="KeepOpen">OK applies the row and rebuilds the sheet in
     /// place (focus stays on the row) — steppers like the subtitle offset.</param>
     /// <param name="Icon">A <see cref="FluentGlyphs"/> glyph leading the row
-    /// (menu rows: the ⚙ sheet); option rows keep the ● marker instead.</param>
+    /// (menu rows: the phone's ⋮ sheet); option rows keep the ● marker instead.</param>
     private sealed record SheetRow(string Label, bool Selected, Action? OnSelect, bool KeepOpen = false,
                                    string? Icon = null);
 
