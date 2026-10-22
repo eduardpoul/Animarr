@@ -72,6 +72,12 @@
     private string _audioPref     = "Japanese";
     private string _subPref       = "Russian";
     private int _subSize          = 18;
+    // Web player sound: loudness levelling and the volume a new device starts
+    // at (AudioPassthrough stays a TV setting — a browser can't pass a
+    // bitstream through, so the web has no switch for it).
+    private bool _normalizeVolume;
+    private int  _defaultVolume   = 100;
+    private string DefaultVolumeText => $"{_defaultVolume} % · {L["profile.default_volume_desc"]}";
     private bool _themeMusic       = false;
     private int  _themeMusicVolume = 40;
     private string _language      = "en";
@@ -148,6 +154,8 @@
         _audioPref       = p.AudioPreferredLanguage;
         _subPref         = p.SubtitlePreferredLanguage;
         _subSize         = p.SubtitleSize;
+        _normalizeVolume = p.NormalizeVolume;
+        _defaultVolume   = p.DefaultVolume;
         _themeMusic       = p.ThemeMusicEnabled;
         _themeMusicVolume = p.ThemeMusicVolume;
         _language        = p.Language;
@@ -477,6 +485,23 @@
         _subPref = e.Value?.ToString() ?? _subPref;
         await PatchAsync(new UpdatePreferencesRequest(
             null, null, null, null, null, null, null, SubtitlePreferredLanguage: _subPref, null, null, null, null, null));
+    }
+
+    private async Task OnNormalizeVolumeToggle(bool on)
+    {
+        _normalizeVolume = on;
+        await PatchAsync(new UpdatePreferencesRequest(
+            null, null, null, null, null, null, null, null, null, null, null, NormalizeVolume: on, null));
+    }
+
+    private async Task OnDefaultVolumeChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var n))
+        {
+            _defaultVolume = Math.Clamp(n, 0, 100);
+            await PatchAsync(new UpdatePreferencesRequest(
+                null, null, null, null, null, null, null, null, null, DefaultVolume: _defaultVolume, null, null, null));
+        }
     }
 
     private async Task OnSubSizeChanged(ChangeEventArgs e)
@@ -1383,6 +1408,17 @@
                 <input type="range" min="12" max="32" step="1" class="fs-range"
                        aria-label="@L["profile.subtitle_size_label"]"
                        value="@_subSize" @onchange="OnSubSizeChanged" />
+            </SettingsCard>
+            @* Web player: EBU R128 levelling per audio track / dub (the server
+               measures it) and the volume a device starts at before its own
+               slider was touched. *@
+            <SettingsCard Icon="audio" Title="@L["profile.normalize_volume_title"]" Description="@L["profile.normalize_volume_desc"]">
+                <Toggle Checked="@_normalizeVolume" CheckedChanged="OnNormalizeVolumeToggle" />
+            </SettingsCard>
+            <SettingsCard Icon="audio" Title="@L["profile.default_volume_title"]" Description="@DefaultVolumeText">
+                <input type="range" min="0" max="100" step="1" class="fs-range"
+                       aria-label="@L["profile.default_volume_title"]"
+                       value="@_defaultVolume" @onchange="OnDefaultVolumeChanged" />
             </SettingsCard>
         </SettingsGroup>
 

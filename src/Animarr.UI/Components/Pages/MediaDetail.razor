@@ -1165,6 +1165,9 @@ else
                         audioLang = Animarr.Shared.LanguageNameMap.ToIso639(prefs.AudioPreferredLanguage),
                         subLang   = Animarr.Shared.LanguageNameMap.ToIso639(subPref),
                         subSize   = prefs.SubtitleSize,
+                        // Loudness levelling + the volume a device starts at.
+                        normalizeVolume = prefs.NormalizeVolume,
+                        defaultVolume   = prefs.DefaultVolume,
                         subMode,
                     });
                 }

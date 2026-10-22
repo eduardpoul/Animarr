@@ -104,7 +104,12 @@
     //   • audioLang→ auto-selects the matching audio track ONLY on a transcoding
     //                HLS session (see attach). Direct Play is never disturbed:
     //                we never force a transcode just to switch audio language.
-    let PREFS = { audioLang: null, subLang: null, subSize: 0, subMode: 'always' };
+    //   • normalizeVolume → level every audio track / dub to the same loudness
+    //                (EBU R128 from /api/loudness, applied by a WebAudio gain +
+    //                limiter — setupLoudness);
+    //   • defaultVolume → the volume a device starts at before anything was
+    //                set on it (0–100; the player's own slider then wins).
+    let PREFS = { audioLang: null, subLang: null, subSize: 0, subMode: 'always', normalizeVolume: false, defaultVolume: null };
     const SUB_MODES = ['default', 'always', 'forced', 'off'];
     function setPrefs(p) {
         let mode = (p && p.subMode) ? String(p.subMode).toLowerCase() : 'always';
@@ -114,6 +119,8 @@
             subLang:   (p && p.subLang)   ? String(p.subLang).toLowerCase()   : null,
             subSize:   (p && Number.isFinite(p.subSize)) ? Math.max(0, p.subSize) : 0,
             subMode:   SUB_MODES.includes(mode) ? mode : 'always',
+            normalizeVolume: !!(p && p.normalizeVolume),
+            defaultVolume:   (p && Number.isFinite(p.defaultVolume)) ? Math.max(0, Math.min(100, p.defaultVolume)) : null,
         };
     }
     // A sidecar file that is a forced / signs track (no disposition flags on
@@ -756,6 +763,88 @@
         style = style || readSubStyle();
         return { scale: style.scale, verticalOffset: -style.pos };
     }
+    // ── Loudness normalisation (stage 7: NormalizeVolume) ─────────────
+    // With the profile's "Normalize volume" on, each stream's audio — the
+    // embedded track a:N or the dub file — is levelled by the gain the server
+    // measured for it (/api/loudness: EBU R128 towards −16 LUFS, true peak
+    // ≤ −1 dBTP). The <video> is routed once through a WebAudio graph:
+    // source → gain → limiter (a fast, hard DynamicsCompressor at −1 dB) →
+    // output. The page's AudioContext only runs after a user gesture, and an
+    // element routed into a suspended context is silent — so routing waits
+    // until the context runs. A measurement still pending is asked for again
+    // a few times; until then (and on any failure) the audio plays as is.
+    let LOUD_CTX = null;
+    function loudnessContext() {
+        if (!LOUD_CTX) {
+            const C = window.AudioContext || window.webkitAudioContext;
+            if (!C) return null;
+            try { LOUD_CTX = new C(); } catch { return null; }
+        }
+        return LOUD_CTX;
+    }
+    function whenAudioRuns(ctx) {
+        if (ctx.state === 'running') return Promise.resolve(true);
+        try { ctx.resume().catch(() => {}); } catch {}
+        return new Promise((resolve) => {
+            const done = () => { cleanup(); resolve(true); };
+            const kick = () => { try { ctx.resume().then(() => { if (ctx.state === 'running') done(); }).catch(() => {}); } catch {} };
+            const onState = () => { if (ctx.state === 'running') done(); };
+            const cleanup = () => {
+                document.removeEventListener('pointerdown', kick, true);
+                document.removeEventListener('keydown', kick, true);
+                try { ctx.removeEventListener('statechange', onState); } catch {}
+            };
+            document.addEventListener('pointerdown', kick, true);
+            document.addEventListener('keydown', kick, true);
+            try { ctx.addEventListener('statechange', onState); } catch {}
+        });
+    }
+    async function setupLoudness(entry) {
+        if (!PREFS.normalizeVolume || !entry || !entry.art || !entry.mediaPath) return;
+        const video = entry.art.video;
+        const path = entry.currentExternalAudioPath || entry.mediaPath;
+        const track = entry.currentExternalAudioPath ? 0 : (entry.currentAudIdx || 0);
+        let res = null;
+        for (let attempt = 0; attempt < 6; attempt++) {
+            if (entry.adapter == null || entry.art == null) return;   // torn down
+            try {
+                const r = await fetch(apiUrl('/api/loudness?path=' + encodeURIComponent(path) + '&track=' + track
+                    + '&wait=' + (attempt === 0 ? 3 : 10)), { signal: entry.abort.signal });
+                res = r.ok ? await r.json() : null;
+            } catch { return; }
+            if (!res || res.status !== 'pending') break;
+            await new Promise(r => setTimeout(r, 5000));
+        }
+        if (!res || res.status !== 'measured' || !Number.isFinite(res.gainDb) || entry.art == null) return;
+        const ctx = loudnessContext();
+        if (!ctx) return;
+        await whenAudioRuns(ctx);
+        if (entry.art == null || entry.art.video !== video) return;
+        try {
+            const gainDb = Math.max(-20, Math.min(15, res.gainDb));
+            const source = ctx.createMediaElementSource(video);
+            const gain = ctx.createGain();
+            gain.gain.value = Math.pow(10, gainDb / 20);
+            const limiter = ctx.createDynamicsCompressor();
+            limiter.threshold.value = -1;
+            limiter.knee.value = 0;
+            limiter.ratio.value = 20;
+            limiter.attack.value = 0.003;
+            limiter.release.value = 0.25;
+            source.connect(gain);
+            gain.connect(limiter);
+            limiter.connect(ctx.destination);
+            entry.loudness = { lufs: res.integratedLufs, gainDb, nodes: [source, gain, limiter] };
+            if (entry.updateMeta) entry.updateMeta();
+        } catch (e) { console.warn('animarrPlayer: loudness normalisation unavailable', e); }
+    }
+    function disposeLoudness(entry) {
+        const l = entry && entry.loudness;
+        if (!l) return;
+        entry.loudness = null;
+        l.nodes.forEach((n) => { try { n.disconnect(); } catch {} });
+    }
+
     /** family (lower-case) → font URL, as JASSUB's availableFonts wants it. */
     function assFontMap(entry) {
         const map = {};
@@ -1264,13 +1353,14 @@
         return 'icons';
     }
 
-    /** Read the saved playback volume (0..1). Defaults to 1.0. */
+    /** Read the saved playback volume (0..1): this device's own last level,
+     *  else the profile's default volume, else 1.0. */
     function readVolumePref() {
         try {
             const v = parseFloat(localStorage.getItem('animarr_player_volume'));
             if (Number.isFinite(v) && v >= 0 && v <= 1) return v;
         } catch {}
-        return 1.0;
+        return PREFS.defaultVolume != null ? PREFS.defaultVolume / 100 : 1.0;
     }
     function saveVolumePref(v) {
         try { localStorage.setItem('animarr_player_volume', String(v)); } catch {}
@@ -3145,6 +3235,7 @@
         quality_original:   'Original',
         unit_mbps:          'Mbps',
         info_buffer:        'Buffer: {0} s ahead, {1} s back',
+        info_loudness:      'Loudness: {0} LUFS, levelled {1} dB',
         // HUD (buttons, tooltips, menus)
         hud_play_pause:     'Play / pause',
         hud_play:           'Play',
@@ -4681,6 +4772,9 @@
         hudCtl.setSpeed(readRatePref());
         entry.hudRoot = hudRoot;
 
+        // Loudness normalisation for this stream's audio (profile setting).
+        setupLoudness(entry);
+
         // Chapter marks: once both the list and the duration are known.
         chaptersPromise.then((list) => {
             if (WIRED.get(elementId) !== entry) return;
@@ -4760,6 +4854,10 @@
                     aParts.push((core ? core + ' · ' : '') + t('track_external'));
                 }
                 if (aParts.length) lines.push(t('info_audio') + ': ' + aParts.join(' · '));
+                // Loudness normalisation in force (stage 7).
+                if (entry.loudness)
+                    lines.push(tf('info_loudness', (Math.round(entry.loudness.lufs * 10) / 10).toFixed(1),
+                        (entry.loudness.gainDb > 0 ? '+' : '') + (Math.round(entry.loudness.gainDb * 10) / 10).toFixed(1)));
                 // The audio's own sync offset (2.8), when it has one.
                 if (entry.streamAudioOffsetMs)
                     lines.push(t('hud_sync') + ': ' + (entry.streamAudioOffsetMs > 0 ? '+' : '−')
@@ -4793,6 +4891,7 @@
             }
         }
         updateMeta();
+        entry.updateMeta = updateMeta;
         entry.clockTimer = setInterval(updateMeta, 30000);
 
         // ── 5c) MediaSession + PiP ────────────────────────────────────
@@ -4974,6 +5073,7 @@
         } catch {}
         entry.subToken = (entry.subToken || 0) + 1;   // a libass start still loading backs out
         disposeSubRenderer(entry);
+        disposeLoudness(entry);
         if (entry.adapter) {
             entry.adapter.destroy();
             entry.adapter = null;
