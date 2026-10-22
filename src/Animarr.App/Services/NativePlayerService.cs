@@ -76,11 +76,6 @@ public sealed class NativePlayerService : IDisposable
     private bool _diagErrLogged;
     private int  _diagPolls;
 
-    // Set once the SurfaceView has been sized to the decoded video aspect.
-    // Reset per play in DoPlay. GetState (polled by the HUD) drives the
-    // one-shot sizing because there's no video-size listener wired.
-    private bool _aspectApplied;
-
     // Lifecycle: remembers PlayWhenReady at OnPause so OnResume can restore
     // whatever the user had going (play→play; pause→pause).
     private bool _wasPlayingBeforePause;
@@ -162,6 +157,12 @@ public sealed class NativePlayerService : IDisposable
 
         public void OnTracksChanged(global::AndroidX.Media3.Common.Tracks tracks)
             => Instance?.TracksChanged?.Invoke();
+
+        // Fired before the first frame of every new size (new stream, a quality
+        // switch, a mid-stream format change). On a Surface the decoder applies
+        // the rotation itself and Media3 reports the size already rotated.
+        public void OnVideoSizeChanged(global::AndroidX.Media3.Common.VideoSize videoSize)
+            => Instance?.OnVideoSize(videoSize.Width, videoSize.Height, videoSize.PixelWidthHeightRatio, "listener");
     }
 
     // BENCH (tv-ui-analysis): SurfaceView variant — video on its own HWC layer.
@@ -178,8 +179,19 @@ public sealed class NativePlayerService : IDisposable
         public void SurfaceDestroyed(ISurfaceHolder holder) { if (Instance is { } s) s._surfaceReady = false; }
     }
 
-    /// <summary>SurfaceView aspect: size + centre the view itself (fit = letterbox,
-    /// zoom = cover, stretch = full, "16:9"-style = forced), parent clips.</summary>
+    /// <summary>SurfaceView aspect: size + centre the view itself, the parent
+    /// clips what overflows. Modes:
+    /// <list type="bullet">
+    ///   <item>"default" — fit (letterbox / pillarbox), undistorted;</item>
+    ///   <item>"zoom" — cover the screen, undistorted, the overflow is cut;</item>
+    ///   <item>"stretch" — the whole screen, distorted;</item>
+    ///   <item>"16:9" / "2.35:1" … — forced display aspect: the picture is
+    ///         stretched to that ratio, fitted;</item>
+    ///   <item>"crop:2.35" — cut bars baked into the picture: the centre
+    ///         2.35:1 band of a taller frame is what gets fitted, so on a
+    ///         2.35 screen (or a 4:3 frame with a scope film inside) it fills
+    ///         the width. A frame already that wide is just fitted.</item>
+    /// </list></summary>
     private void ApplySurfaceAspect(SurfaceView sv)
     {
         try
@@ -187,22 +199,11 @@ public sealed class NativePlayerService : IDisposable
             if (sv.Parent is not global::Android.Views.View parent) return;
             int W = parent.Width, H = parent.Height;
             if (W <= 0 || H <= 0) return;
-            float videoAspect = _vidH > 0 && _vidW > 0 ? _vidW * _vidPar / _vidH : 0f;
-            float target = _aspectValue switch
-            {
-                "stretch" => 0f,
-                "zoom" or null or "" or "default" => videoAspect,
-                _ => ParseAspect(_aspectValue),
-            };
-            int w = W, h = H;
-            if (target > 0f)
-            {
-                float view = (float)W / H;
-                bool cover = _aspectValue == "zoom";
-                if ((target >= view) ^ cover) { w = W; h = (int)Math.Round(W / target); }
-                else { h = H; w = (int)Math.Round(H * target); }
-            }
+            var (w, h) = SurfaceSize(W, H);
             int l = (W - w) / 2, t = (H - h) / 2;
+            if (sv.Width != w || sv.Height != h || sv.Left != l || sv.Top != t)
+                global::Android.Util.Log.Info("Animarr.NativePlayer",
+                    $"aspect {_aspectValue}: video {_vidW}x{_vidH} par={_vidPar:0.###} → surface {w}x{h} at {l},{t} in {W}x{H}");
             sv.Measure(global::Android.Views.View.MeasureSpec.MakeMeasureSpec(w, MeasureSpecMode.Exactly),
                        global::Android.Views.View.MeasureSpec.MakeMeasureSpec(h, MeasureSpecMode.Exactly));
             sv.Layout(l, t, l + w, t + h);
@@ -212,6 +213,58 @@ public sealed class NativePlayerService : IDisposable
             global::Android.Util.Log.Warn("Animarr.NativePlayer", $"ApplySurfaceAspect: {ex.Message}");
         }
     }
+
+    /// <summary>Surface size for the current mode inside a W×H screen.</summary>
+    private (int W, int H) SurfaceSize(int W, int H)
+    {
+        float videoAspect = _vidH > 0 && _vidW > 0 ? _vidW * _vidPar / _vidH : 0f;
+        var mode = _aspectValue ?? "default";
+        if (mode.StartsWith("crop:", StringComparison.Ordinal))
+        {
+            float band = ParseAspect(mode[5..]);
+            if (videoAspect > 0f && band > videoAspect)
+            {
+                // Width u fits the band (u × u/band) in the screen; the frame
+                // (u × u/videoAspect) is taller and its bars overflow.
+                float u = Math.Min(W, H * band);
+                return ((int)Math.Round(u), (int)Math.Round(u / videoAspect));
+            }
+            mode = "default";
+        }
+        float target = mode switch
+        {
+            "stretch" => 0f,
+            "zoom" or "" or "default" => videoAspect,
+            _ => ParseAspect(mode),
+        };
+        if (target <= 0f) return (W, H);
+        float view = (float)W / H;
+        bool cover = mode == "zoom";
+        return (target >= view) ^ cover
+            ? (W, (int)Math.Round(W / target))
+            : ((int)Math.Round(H * target), H);
+    }
+
+    /// <summary>Decoded picture geometry (display orientation: width/height
+    /// already swapped for a 90°/270° rotation). The listener is the source; a
+    /// stream it says nothing about (same size as the previous one) is taken
+    /// from the polled Format. Re-sizes the surface on every change — it used
+    /// to be sized once per prepare (and only on the TextureView path when the
+    /// size changed mid-stream), keeping the previous episode's geometry for
+    /// up to a second and showing a first frame of a new stream stretched.</summary>
+    private void OnVideoSize(int width, int height, float par, string source)
+    {
+        if (width <= 0 || height <= 0) return;   // VideoSize.UNKNOWN while preparing
+        if (par <= 0f) par = 1f;
+        _sizeKnown = true;
+        if (width == _vidW && height == _vidH && System.Math.Abs(par - _vidPar) <= 0.001f) return;
+        global::Android.Util.Log.Info("Animarr.NativePlayer", $"video size {width}x{height} par={par:0.###} ({source})");
+        _vidW = width; _vidH = height; _vidPar = par;
+        ApplyAspectMatrix();
+    }
+
+    /// <summary>The current stream's geometry has been reported (reset per prepare).</summary>
+    private bool _sizeKnown;
 
     public static void RegisterTextureView(TextureView textureView)
     {
@@ -476,7 +529,9 @@ public sealed class NativePlayerService : IDisposable
                 // Reset diag + aspect guards so GetState re-logs format/error
                 // and re-sizes the SurfaceView for this play.
                 _diagFmtLogged = false; _diagErrLogged = false; _diagPolls = 0;
-                _aspectApplied = false;
+                // The previous stream's geometry stays until this one reports
+                // its own (its last frame is still on the surface until then).
+                _sizeKnown = false;
                 _logger.LogInformation("NativePlayer.DoPlay: attached + prepared {Url} resume={ResumeMs}ms",
                     url, resumeMs);
                 global::Android.Util.Log.Info("Animarr.NativePlayer",
@@ -798,7 +853,8 @@ public sealed class NativePlayerService : IDisposable
                 {
                     try { _player.ClearVideoTextureView(s_textureView); } catch { }
                 }
-                _aspectApplied = false;
+                // A new player page starts on a fresh surface: no geometry yet.
+                _sizeKnown = false; _vidW = _vidH = 0; _vidPar = 1f;
                 // Release() drops the decoder buffers (~50-200MB on a 4K HDR
                 // stream — lives in C++ JNI heap, not the .NET GC reachable
                 // heap). Without this call the buffers leak between play
@@ -924,19 +980,17 @@ public sealed class NativePlayerService : IDisposable
                         actualCodec     = NormalizeCodec(fmt.SampleMimeType);
                         actualWidth     = fmt.Width;
                         actualHeight    = fmt.Height;
-                        // Decoded geometry changed (first frames / new episode /
-                        // quality switch) → re-apply the aspect transform. The
-                        // HUD polls this every few hundred ms, which stands in
-                        // for an OnVideoSizeChanged listener.
-                        float par = 1f;
-                        try { par = fmt.PixelWidthHeightRatio; } catch { }
-                        if (par <= 0f) par = 1f;
-                        if (actualWidth > 0 && actualHeight > 0 &&
-                            (actualWidth != _vidW || actualHeight != _vidH ||
-                             System.Math.Abs(par - _vidPar) > 0.001f))
+                        // Fallback for a stream the size listener said nothing
+                        // about: the Format, turned to display orientation
+                        // (Format sizes are as encoded, RotationDegrees apart).
+                        if (!_sizeKnown && actualWidth > 0 && actualHeight > 0)
                         {
-                            _vidW = actualWidth; _vidH = actualHeight; _vidPar = par;
-                            s_textureView?.Post(() => ApplyAspectMatrix());
+                            float par = 1f;
+                            try { par = fmt.PixelWidthHeightRatio; } catch { }
+                            if (par <= 0f) par = 1f;
+                            bool turned = fmt.RotationDegrees is 90 or 270;
+                            OnVideoSize(turned ? actualHeight : actualWidth, turned ? actualWidth : actualHeight,
+                                        turned ? 1f / par : par, $"format rot={fmt.RotationDegrees}");
                         }
                         // ColorInfo's bit-depth fields aren't directly exposed
                         // as ints; pix_fmt detection happens server-side. Best
@@ -958,16 +1012,6 @@ public sealed class NativePlayerService : IDisposable
                     }
                 }
                 catch { /* VideoFormat not available before first frame */ }
-
-                // Once the decoded video size is known, size the SurfaceView to
-                // its aspect (one-shot). There's no video-size listener wired,
-                // so this poll is what drives it. ApplyAspectMatrix reposts to
-                // the UI thread internally.
-                if (!_aspectApplied && actualWidth > 0 && actualHeight > 0)
-                {
-                    _aspectApplied = true;
-                    ApplyAspectMatrix();
-                }
 
                 // ── Diagnostics (logcat "Animarr.NativePlayer") ──────────
                 // Decides surface-vs-codec for the "audio but no video" bug.

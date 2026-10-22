@@ -1579,15 +1579,21 @@ public partial class PlayerPage : ContentPage
 
     private void OpenAspectSheet()
     {
+        // Same set as the web player: fit / cover / stretch, a crop of bars
+        // baked into the picture, and forced display ratios — those STRETCH
+        // the picture to the ratio (fitted), they don't crop it.
         var rows = new List<SheetRow>
         {
-            new("Авто (вписать)",        _aspect is "default" or "", () => ApplyAspect("default", "Авто")),
-            new("Растянуть на экран",    _aspect == "stretch",       () => ApplyAspect("stretch", "Растянуть")),
-            new("Заполнить (обрезать)",  _aspect == "zoom",          () => ApplyAspect("zoom", "Заполнить")),
-            new("21:9",                  _aspect == "21:9",          () => ApplyAspect("21:9", "21:9")),
-            new("16:9",                  _aspect == "16:9",          () => ApplyAspect("16:9", "16:9")),
-            new("4:3",                   _aspect == "4:3",           () => ApplyAspect("4:3", "4:3")),
+            new("Авто (вписать)",             _aspect is "default" or "", () => ApplyAspect("default", "Авто")),
+            new("Заполнить экран (обрезать)", _aspect == "zoom",          () => ApplyAspect("zoom", "Заполнить")),
+            new("Обрезать до 21:9 / 2.35",    _aspect == "crop:2.35",     () => ApplyAspect("crop:2.35", "обрезка до 2.35")),
+            new("Растянуть на экран",         _aspect == "stretch",       () => ApplyAspect("stretch", "Растянуть")),
         };
+        foreach (var r in new[] { "2.35:1", "21:9", "1.85:1", "16:9", "4:3" })
+        {
+            var ratio = r;
+            rows.Add(new SheetRow($"{ratio} (растянуть)", _aspect == ratio, () => ApplyAspect(ratio, ratio)));
+        }
         OpenListSheet("СООТНОШЕНИЕ СТОРОН", rows, AspectButton);
     }
 
