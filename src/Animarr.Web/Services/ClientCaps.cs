@@ -13,7 +13,12 @@ namespace Animarr.Web.Services;
 ///   • containers — mp4 m4v mov webm (browser) + mkv ts m2ts avi flv ogg wav (native players);
 ///   • video — h264 hevc hevc10 av1 vp9 vp8 mpeg4 mpeg2;
 ///   • audio — aac mp3 opus vorbis flac ac3 eac3 dts truehd pcm;
-///   • display — <c>hdr</c> (shows HDR10/HLG as HDR), <c>dv</c> (decodes Dolby Vision itself).
+///   • display — <c>hdr</c> (shows HDR10/HLG as HDR), <c>dv</c> (decodes Dolby Vision itself);
+///   • decoder size limits — <c>codec@WxH</c> (<c>hevc@4096x2160</c>, <c>av1@1920x1080</c>):
+///     the largest frame that codec's decoder takes. Implies the plain codec
+///     token; a source beyond it is not copied (it is re-encoded, scaled down
+///     to fit where the output codec has a limit too). <c>hevc</c>'s limit
+///     also covers <c>hevc10</c> unless that has its own.
 /// A request without tokens (an older web build, curl) is <see cref="IsLegacyBrowser"/>:
 /// the server keeps its browser defaults for it.
 /// </summary>
@@ -27,8 +32,24 @@ public sealed class ClientCaps
 
     private readonly HashSet<string> _tokens;
 
+    private readonly Dictionary<string, (int W, int H)> _sizes = new(StringComparer.Ordinal);
+
     private ClientCaps(HashSet<string> tokens, int maxAudioChannels, bool hevc, bool hevc10, bool hlsRemux = false)
     {
+        // codec@WxH: the limit, and the codec itself as a plain token.
+        foreach (var t in tokens.ToList())
+        {
+            var at = t.IndexOf('@');
+            if (at <= 0) continue;
+            var x = t.IndexOf('x', at + 1);
+            if (x < 0
+                || !int.TryParse(t.AsSpan(at + 1, x - at - 1), NumberStyles.None, CultureInfo.InvariantCulture, out var w)
+                || !int.TryParse(t.AsSpan(x + 1), NumberStyles.None, CultureInfo.InvariantCulture, out var h)
+                || w <= 0 || h <= 0) continue;
+            var codec = t[..at];
+            tokens.Add(codec);
+            _sizes[codec] = _sizes.TryGetValue(codec, out var old) ? (Math.Max(old.W, w), Math.Max(old.H, h)) : (w, h);
+        }
         _tokens = tokens;
         HlsRemux = hlsRemux;
         MaxAudioChannels = maxAudioChannels;
@@ -45,6 +66,32 @@ public sealed class ClientCaps
     public bool IsLegacyBrowser => !HasTokens;
 
     public bool Has(string token) => _tokens.Contains(token);
+
+    /// <summary>The decoder size limit of a codec token (hevc10 falls back to
+    /// hevc's); null = none reported.</summary>
+    public (int W, int H)? SizeLimit(string codec)
+        => _sizes.TryGetValue(codec, out var s) ? s
+         : codec == "hevc10" && _sizes.TryGetValue("hevc", out var h) ? h
+         : null;
+
+    /// <summary>Whether a <paramref name="width"/>×<paramref name="height"/>
+    /// frame fits the codec's reported decoder limit (either orientation —
+    /// decoders report the long and the short side); true without a limit.</summary>
+    public bool FitsDecoder(string codec, int width, int height)
+    {
+        if (SizeLimit(codec) is not { } s || width <= 0 || height <= 0) return true;
+        return (width <= s.W && height <= s.H) || (width <= s.H && height <= s.W);
+    }
+
+    /// <summary>The largest even output height at which a frame of the source's
+    /// aspect fits the codec's decoder limit; 0 = it fits as is (or no limit).</summary>
+    public int FitHeight(string codec, int width, int height)
+    {
+        if (FitsDecoder(codec, width, height) || SizeLimit(codec) is not { } s) return 0;
+        var (lw, lh) = width >= height ? (Math.Max(s.W, s.H), Math.Min(s.W, s.H)) : (Math.Min(s.W, s.H), Math.Max(s.W, s.H));
+        var scale = Math.Min((double)lw / width, (double)lh / height);
+        return Math.Max(2, (int)Math.Floor(height * scale) & ~1);
+    }
 
     /// <summary>
     /// The client wants a needed remux (the video plays, the container or the

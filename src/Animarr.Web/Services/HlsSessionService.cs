@@ -335,6 +335,9 @@ public sealed partial class HlsSessionService : IDisposable
         /// have been used (POST /api/playback/failure) — the next one down is
         /// served (task 6.1).</summary>
         public const string DeviceFailedBefore = "device_failed_before";
+        /// <summary>The client decodes the codec but not at this resolution
+        /// (its codec@WxH limit) — re-encoded, scaled down to fit.</summary>
+        public const string DecoderLimit = "decoder_limit";
     }
 
     /// <summary>
@@ -597,6 +600,7 @@ public sealed partial class HlsSessionService : IDisposable
             ReasonCodes.DolbyVision    => "Dolby Vision profile 5 needs a DV decoder",
             ReasonCodes.BurnedSubtitle => "subtitles burned in",
             ReasonCodes.DeviceFailedBefore => "this device failed to decode the original before",
+            ReasonCodes.DecoderLimit => "the device's decoder doesn't take this resolution",
             _                          => $"the client can't decode {DescribeVideo(probe)}",
         };
         string? reason = isDirectPlay ? null : isDirectStream
@@ -620,7 +624,8 @@ public sealed partial class HlsSessionService : IDisposable
             if (isReencode && target != VideoTarget.Hevc10Hdr && HdrToneMap.IsHdr(probe.ColorTransfer, probe.HasDolbyVision))
                 codes.Add(toneMapper != HdrToneMapper.None ? ReasonCodes.HdrTonemap : ReasonCodes.HdrLost);
             if (audio is { Copy: false } && reasonCode != ReasonCodes.ExternalAudio
-                && !(extraReasons?.Contains(ReasonCodes.ExternalAudio) ?? false))
+                && !(extraReasons?.Contains(ReasonCodes.ExternalAudio) ?? false)
+                && !codes.Contains(ReasonCodes.AudioUnsupported))
                 codes.Add(ReasonCodes.AudioUnsupported);
             foreach (var extra in extraReasons ?? []) if (!codes.Contains(extra)) codes.Add(extra);
         }
@@ -678,7 +683,7 @@ public sealed partial class HlsSessionService : IDisposable
     {
         // (Dolby Vision is judged by the caller — DolbyVision.For.)
         var vc = (probe.VideoCodec ?? "").ToLowerInvariant();
-        return vc switch
+        bool ok = vc switch
         {
             "h264"  => !probe.Is10Bit && caps.Has("h264"),
             "hevc"  => caps.Has(probe.Is10Bit ? "hevc10" : "hevc"),
@@ -689,7 +694,26 @@ public sealed partial class HlsSessionService : IDisposable
             "av1"   => caps.Has("av1"),
             _       => false,
         };
+        // …and at this size (codec@WxH tokens): a 4K stream for a 1080p decoder
+        // is not copied.
+        return ok && FitsClientDecoder(probe, caps);
     }
+
+    /// <summary>The caps token of the source's video codec ("hevc10" for Main10).</summary>
+    private static string VideoToken(ProbeInfo probe)
+    {
+        var vc = (probe.VideoCodec ?? "").ToLowerInvariant();
+        return vc switch
+        {
+            "hevc" => probe.Is10Bit ? "hevc10" : "hevc",
+            "mpeg2video" => "mpeg2",
+            _ => vc,
+        };
+    }
+
+    /// <summary>The source's frame fits the client's decoder limit for its codec.</summary>
+    private static bool FitsClientDecoder(ProbeInfo probe, ClientCaps caps)
+        => caps.FitsDecoder(VideoToken(probe), probe.Width, probe.Height);
 
     private static bool IsDirectPlayEligible(string container, ProbeInfo probe, bool clientHevc, bool clientHevc10)
     {
@@ -953,6 +977,21 @@ public sealed partial class HlsSessionService : IDisposable
         // What a re-encode writes: H.264 8-bit, or HEVC Main10 where the client
         // and this plan's encoder can (ChooseVideoTarget).
         var target = ChooseVideoTarget(plan, probe, caps, burning: burn is not null);
+        // A re-encode must also fit the client's decoder for what it writes
+        // (codec@WxH): a HEVC output beyond the hevc limit goes H.264 instead,
+        // and the output is scaled down to the H.264 / HEVC limit.
+        bool reencodePlan = plan is HlsPlan.Fmp4VaapiReencode or HlsPlan.Fmp4NvencReencode or HlsPlan.Fmp4SoftwareReencode;
+        if (reencodePlan && probe is not null)
+        {
+            if (target != VideoTarget.H264 && !caps.FitsDecoder("hevc10", probe.Width, probe.Height)) target = VideoTarget.H264;
+            var fitH = caps.FitHeight(target == VideoTarget.H264 ? "h264" : "hevc10", probe.Width, probe.Height);
+            if (fitH > 0 && (targetHeight == 0 || fitH < targetHeight))
+            {
+                _logger.LogInformation("HLS: {Path} {W}x{H} is beyond the client's decoder — re-encoding at {Fit}p",
+                    fullPath, probe.Width, probe.Height, fitH);
+                targetHeight = fitH;
+            }
+        }
         if (noHevcOutput && target != VideoTarget.H264)
         {
             target = VideoTarget.H264;

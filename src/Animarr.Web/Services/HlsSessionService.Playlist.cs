@@ -335,6 +335,8 @@ public sealed partial class HlsSessionService
         if (burning) return ReasonCodes.BurnedSubtitle;
         if (probe.Interlaced && !client.NativePlayer) return ReasonCodes.Interlaced;
         if (DolbyVision.For(probe.Dovi, client) == DoviHandling.Reencode) return ReasonCodes.DolbyVision;
+        // The client decodes the codec, just not at this size.
+        if (client.Has(VideoToken(probe)) && !FitsClientDecoder(probe, client)) return ReasonCodes.DecoderLimit;
         return ReasonCodes.CodecUnsupported;
     }
 
@@ -388,6 +390,10 @@ public sealed partial class HlsSessionService
         // the Direct Play / Direct Stream / native gates already say so — and a
         // stream-copy of it was a black screen with no further fallback. It
         // re-encodes below like the legacy codecs.
+        // A frame beyond the client's decoder limit (codec@WxH) is never
+        // copied: the re-encode, scaled down to what the output codec takes.
+        if (!FitsClientDecoder(probe, client)) return ReencodePlanFor(probe);
+
         if (string.Equals(probe.VideoCodec, "h264", StringComparison.OrdinalIgnoreCase) && !probe.Is10Bit)
             return HlsPlan.TsStreamCopy;
 

@@ -116,7 +116,8 @@ public sealed partial class HlsSessionService
         if (client.HasTokens)
         {
             bool videoOk = NativeVideoOk(probe, client);
-            var videoWhy = !videoOk ? ReasonCodes.CodecUnsupported
+            var videoWhy = !videoOk && client.Has(VideoToken(probe)) && !FitsClientDecoder(probe, client) ? ReasonCodes.DecoderLimit
+                : !videoOk ? ReasonCodes.CodecUnsupported
                 : dovi == DoviHandling.Reencode ? ReasonCodes.DolbyVision
                 : interlacedForBrowser ? ReasonCodes.Interlaced : null;
             if (videoWhy is not null) { dp.Add(videoWhy); ds.Add(videoWhy); }
@@ -173,10 +174,11 @@ public sealed partial class HlsSessionService
         {
             "h264" => !probe.Is10Bit,
             "hevc" => probe.Is10Bit ? client.Hevc10 : client.Hevc,
-            "av1" or "vp9" => client.HasTokens && NativeVideoOk(probe, client),
+            "av1" or "vp9" => client.Has(vcodec),
             _ => false,
         };
         if (!copyDecodes) copy.Add(ReasonCodes.CodecUnsupported);
+        else if (!FitsClientDecoder(probe, client)) copy.Add(ReasonCodes.DecoderLimit);
         else if (dovi == DoviHandling.Reencode) copy.Add(ReasonCodes.DolbyVision);
         if (steps.NoCopy) copy.Add(ReasonCodes.DeviceFailedBefore);
 
