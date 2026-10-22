@@ -745,10 +745,15 @@
         }
         return JASSUB_LOAD;
     }
+    // BITSUB_BROKEN: libbitsub can't run on this page (the module, its wasm
+    // or its canvas / worker setup failed). libbitsub keeps a rejected wasm
+    // init for the page's lifetime, so every later renderer would fail the
+    // same way — bitmap tracks go to burn-in until a reload.
     let BITSUB_LOAD = null, BITSUB_BROKEN = false;
     function loadBitsub() {
         if (!BITSUB_LOAD) {
             BITSUB_LOAD = import(vendorUrl('libbitsub/libbitsub.bundle.js'))
+                .then(async (m) => { if (typeof m.initWasm === 'function') await m.initWasm(); return m; })
                 .catch((e) => { BITSUB_LOAD = null; BITSUB_BROKEN = true; throw e; });
         }
         return BITSUB_LOAD;
@@ -923,6 +928,11 @@
     function laterToast(entry, title, detail) {
         setTimeout(() => { if (entry.hudRoot && entry.adapter) showToast(entry.hudRoot, title, detail); }, 1200);
     }
+    /** Now when the HUD is up, else once it is. */
+    function subToast(entry, title, detail) {
+        if (entry.hudRoot) showToast(entry.hudRoot, title, detail);
+        else laterToast(entry, title, detail);
+    }
     /** `user`: the CC menu (may burn in); else the initial pick / a restart,
      *  which never starts a re-encode on its own. */
     async function applySubtitleChoice(entry, choice, user) {
@@ -975,6 +985,25 @@
                 const video = entry.art && entry.art.video;
                 if (entry.subToken !== token || !video) return;
                 const Ctor = plan.format === 'vobsub' ? lib.VobSubRenderer : lib.PgsRenderer;
+                // libbitsub reports a failed subtitle LOAD through onError (and
+                // onEvent), but a failed wasm init / canvas / worker setup only
+                // as an onEvent 'error' — the renderer then draws nothing, for
+                // good. One report per renderer; a setup failure also marks
+                // libbitsub broken for the page (embedded tracks → burn-in).
+                let reported = false, loadFailed = false;
+                const fail = (err, setup) => {
+                    if (reported) return;
+                    reported = true;
+                    console.warn('animarrPlayer: bitmap subtitles failed' + (setup ? ' (renderer setup)' : ''), err);
+                    if (setup) BITSUB_BROKEN = true;
+                    if (entry.subToken !== token) return;
+                    if (setup) {
+                        disposeSubRenderer(entry);
+                        entry.currentSubIdx = null;
+                        entry.currentExtSubPath = null;
+                    }
+                    subToast(entry, t('sub_bitmap_failed'), plan.burnIndex != null ? t('sub_burn_hint') : plan.name);
+                };
                 const inst = new Ctor({
                     video,
                     subUrl: plan.subUrl,
@@ -982,16 +1011,23 @@
                     container: entry.art.template.$player,
                     timeOffset: -(entry.subOffset || 0),
                     displaySettings: bitmapDisplay(),
-                    onError: (e) => {
-                        console.warn('animarrPlayer: bitmap subtitles failed', e);
-                        if (entry.subToken === token && entry.hudRoot) showToast(entry.hudRoot, t('sub_bitmap_failed'), plan.name);
+                    onError: (e) => { loadFailed = true; fail(e, false); },
+                    // A load failure lands here first and in onError right
+                    // after (same tick) — so judge on the next one.
+                    onEvent: (ev) => {
+                        if (!ev || ev.type !== 'error') return;
+                        setTimeout(() => { if (!loadFailed) fail(ev.error, true); }, 0);
                     },
                 });
                 entry.subRenderer = { kind: 'bitmap', inst, dispose: () => inst.dispose() };
             } catch (e) {
                 console.warn('animarrPlayer: bitmap subtitle renderer unavailable', e);
-                if (entry.subToken === token && entry.hudRoot)
-                    showToast(entry.hudRoot, t('sub_bitmap_failed'), plan.burnIndex != null ? t('sub_burn_hint') : plan.name);
+                BITSUB_BROKEN = true;
+                if (entry.subToken === token) {
+                    entry.currentSubIdx = null;
+                    entry.currentExtSubPath = null;
+                    subToast(entry, t('sub_bitmap_failed'), plan.burnIndex != null ? t('sub_burn_hint') : plan.name);
+                }
             }
             return;
         }
