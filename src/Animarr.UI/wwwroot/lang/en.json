@@ -569,6 +569,7 @@
   "player.edge_none": "None",
   "player.unit_s": "s",
   "player.reset": "Reset",
+  "player.sub_styled_hint": "This track is drawn with its own ASS styles and fonts; size and colour apply to plain text tracks.",
   "player.track_n": "Track {0}",
   "player.track_default": "default",
   "player.track_forced": "forced",

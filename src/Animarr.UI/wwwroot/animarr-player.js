@@ -691,6 +691,129 @@
             }
             art.subtitle.update();
         } catch (e) { console.warn('subtitle offset failed', e); }
+        const r = entry.subRenderer;
+        if (r && r.kind === 'ass') {
+            try { r.inst.timeOffset = -want; r.inst.resize(true); } catch {}
+        }
+    }
+
+    // ── Subtitle renderers (task 2.5) ─────────────────────────────────
+    // A subtitle choice renders one of two ways (subtitlePlan):
+    //   text — WebVTT through Artplayer's <track> + renderCuesSafely (SRT,
+    //          VTT, mov_text, and an ASS script whose styling a WebVTT
+    //          rendering doesn't lose — /api/subtitle/tracks says so);
+    //   ass  — the ORIGINAL ASS / SSA script through JASSUB (libass in
+    //          WebAssembly: positions, karaoke, typesetting, the file's own
+    //          fonts), for every ASS track the server marks complex or hasn't
+    //          analysed yet, and every sidecar .ass / .ssa.
+    // JASSUB is self-hosted under wwwroot/vendor/jassub (the server may be
+    // offline / LAN-only) and loaded on first use; the fonts attached to the
+    // video come from /api/subtitle/tracks, with the bundled Liberation Sans
+    // as the fallback. One renderer per player: replaced on every choice,
+    // disposed on restart / close (teardown).
+    const PLAYER_BASE = (() => {
+        try { if (document.currentScript && document.currentScript.src) return new URL('.', document.currentScript.src).href; } catch {}
+        return new URL('_content/Animarr.UI/', document.baseURI).href;
+    })();
+    const vendorUrl = (p) => new URL('vendor/' + p, PLAYER_BASE).href;
+    /** A media URL the server answered relative ("/api/subtitle?…"). */
+    const mediaApiUrl = (rel) => !rel ? null : /^https?:/i.test(rel) ? withMediaToken(rel) : apiUrl(rel);
+    let JASSUB_LOAD = null;
+    function loadJassub() {
+        if (!JASSUB_LOAD) {
+            JASSUB_LOAD = import(vendorUrl('jassub/jassub.js')).then(m => m.default)
+                .catch((e) => { JASSUB_LOAD = null; throw e; });
+        }
+        return JASSUB_LOAD;
+    }
+    /** family (lower-case) → font URL, as JASSUB's availableFonts wants it. */
+    function assFontMap(entry) {
+        const map = {};
+        (entry.subFonts || []).forEach((f) => {
+            const url = mediaApiUrl(f.url);
+            if (!url) return;
+            [f.family, f.fullName, f.postScriptName].forEach((n) => {
+                const k = String(n || '').trim().toLowerCase();
+                if (k && !map[k]) map[k] = url;
+            });
+        });
+        map['liberation sans'] = map['liberation sans'] || vendorUrl('jassub/default.woff2');
+        return map;
+    }
+    /** { kind: 'text' | 'ass', url, fallbackUrl, name } for a choice
+     *  ({ idx } embedded s:N | { ext } sidecar path), or null. */
+    function subtitlePlan(entry, choice) {
+        if (choice && choice.idx != null) {
+            const s = (entry.subtitleList || [])[choice.idx];
+            if (!s) return null;
+            const info = (entry.subTracks || []).find(t => t.index === choice.idx) || null;
+            const codec = String((info && info.codec) || s.codec || '').toLowerCase();
+            if (codec === 'ass' || codec === 'ssa') {
+                // Not analysed yet → libass, to be safe.
+                const complex = info && info.ass ? !!info.ass.complex : true;
+                if (complex) {
+                    const url = (info && mediaApiUrl(info.assUrl))
+                        || apiUrl('/api/subtitle?path=' + encodeURIComponent(entry.mediaPath) + '&track=' + choice.idx + '&format=ass');
+                    return { kind: 'ass', url, fallbackUrl: s.url, name: s.name };
+                }
+            }
+            return { kind: 'text', url: s.url, name: s.name };
+        }
+        if (choice && choice.ext) {
+            const x = (entry.externalSubList || []).find(t => samePath(t.path, choice.ext));
+            if (!x) return null;
+            const ext = String(x.ext || '').toLowerCase();
+            if (ext === 'ass' || ext === 'ssa') {
+                return { kind: 'ass', url: apiUrl('/api/subtitle?path=' + encodeURIComponent(x.path) + '&track=0&format=ass'),
+                         fallbackUrl: externalSubUrl(x.path), name: x.label };
+            }
+            return { kind: 'text', url: externalSubUrl(x.path), name: x.label };
+        }
+        return null;
+    }
+    function disposeSubRenderer(entry) {
+        const r = entry && entry.subRenderer;
+        if (!r) return;
+        entry.subRenderer = null;
+        try { r.dispose(); } catch (e) { console.warn('subtitle renderer dispose failed', e); }
+    }
+    /** THE place a subtitle choice is put on screen — the CC menu, the
+     *  initial pick, a restart. `choice`: { idx } | { ext } | null (Off). */
+    async function applySubtitleChoice(entry, choice) {
+        const token = (entry.subToken = (entry.subToken || 0) + 1);
+        disposeSubRenderer(entry);
+        entry.currentSubIdx     = choice && choice.idx != null ? choice.idx : null;
+        entry.currentExtSubPath = choice && choice.ext ? choice.ext : null;
+        const plan = choice ? subtitlePlan(entry, choice) : null;
+        const adapter = entry.adapter;
+        if (!adapter) return;
+        if (!plan) { adapter.setSubtitle(null); return; }
+        if (plan.kind === 'text') { adapter.setSubtitle({ url: plan.url, name: plan.name, type: 'vtt' }); return; }
+        adapter.setSubtitle(null);   // Artplayer's own overlay stays empty
+        try {
+            // The video's attached fonts (the tracks answer) before libass starts.
+            if (entry.subTracksReady) await withTimeout(entry.subTracksReady, 5000, null);
+            const JASSUB = await loadJassub();
+            const video = entry.art && entry.art.video;
+            if (entry.subToken !== token || !video) return;
+            const inst = new JASSUB({
+                video,
+                subUrl: plan.url,
+                workerUrl: vendorUrl('jassub/jassub-worker.bundle.js'),
+                wasmUrl: vendorUrl('jassub/jassub-worker.wasm'),
+                modernWasmUrl: vendorUrl('jassub/jassub-worker-modern.wasm'),
+                availableFonts: assFontMap(entry),
+                defaultFont: 'liberation sans',
+                queryFonts: false,
+                // + offset = lines later = libass renders an earlier moment.
+                timeOffset: -(entry.subOffset || 0),
+            });
+            entry.subRenderer = { kind: 'ass', inst, dispose: () => inst.destroy() };
+        } catch (e) {
+            console.warn('animarrPlayer: libass renderer unavailable, showing the track as plain text', e);
+            if (entry.subToken === token && plan.fallbackUrl)
+                adapter.setSubtitle({ url: plan.fallbackUrl, name: plan.name, type: 'vtt' });
+        }
     }
 
     // ── Subtitle style (task 2.7) ─────────────────────────────────────
@@ -1477,6 +1600,11 @@
             offCtl.appendChild(reset);
             body.appendChild(mkEl('div', 'vp-panel__hint', t('sub_offset_hint')));
 
+            // A libass track is drawn with its own styles: only timing applies.
+            if (entry.subRenderer && entry.subRenderer.kind === 'ass') {
+                body.appendChild(mkEl('div', 'vp-panel__hint', t('sub_styled_hint')));
+                return;
+            }
             const style = readSubStyle();
             const update = (patch) => {
                 Object.assign(style, patch);
@@ -2842,6 +2970,7 @@
         edge_none:          'None',
         unit_s:             's',
         reset:              'Reset',
+        sub_styled_hint:    'This track is drawn with its own ASS styles and fonts; size and colour apply to plain text tracks.',
         track_n:            'Track {0}',
         track_default:      'default',
         track_forced:       'forced',
@@ -3636,6 +3765,15 @@
             ? fetch(apiUrl('/api/probe?path=' + encodeURIComponent(mediaPath)), { signal: abort.signal })
                 .then(r => (r.ok ? r.json() : null)).catch(() => null)
             : Promise.resolve(null);
+        // Which renderer each subtitle track needs + the fonts attached to the
+        // video (task 2.5). Never awaited by the start — its first call per
+        // file extracts the font attachments; a libass track waits for it.
+        entry.subTracksReady = mediaPath
+            ? fetch(apiUrl('/api/subtitle/tracks?path=' + encodeURIComponent(mediaPath)), { signal: abort.signal })
+                .then(r => (r.ok ? r.json() : null))
+                .then((d) => { if (d) { entry.subTracks = d.tracks || []; entry.subFonts = d.fonts || []; } return d; })
+                .catch(() => null)
+            : Promise.resolve(null);
 
         let started = (opts && opts.prestarted) || null;
         if (!started) {
@@ -3746,6 +3884,7 @@
                         return {
                             name: embeddedTrackLabel(s, idx, forced),
                             lang,
+                            codec: s.codec_name || '',
                             url:  apiUrl('/api/subtitle?path=' + encodeURIComponent(mediaPath))
                                 + '&track=' + idx + '&format=webvtt',
                             // The file's own flag only — the "Default" mode
@@ -3898,7 +4037,6 @@
         } else if (restore.sub.idx != null && restore.sub.idx < subtitleList.length) {
             initialSubIdx = restore.sub.idx;
         }   // else: was Off, or an external track (restoredExtSub, below)
-        const initialSub = initialSubIdx >= 0 ? subtitleList[initialSubIdx] : null;
         // hls.js buffer sizes (bufferProfile) — known up front so Info
         // can show them from the first paint.
         entry.bufferProfile = isHls ? bufferProfile() : null;
@@ -4021,16 +4159,11 @@
         // track (none in the file, or subtitles Off) it carries no url, so
         // nothing loads until the CC menu picks one; escape + style stay so
         // that later switch() (which merges this object) inherits them.
+        // No url: the initial track goes up through applySubtitleChoice
+        // right after creation, like every later one (it may need libass).
         subtitle: {
-            ...(initialSub ? {
-                url: initialSub.url,
-                // Artplayer accepts 'vtt' | 'srt' | 'ass'. 'webvtt' is NOT
-                // a recognised value and silently dropped on the loader
-                // path — fix landed 2026-05-27 after subtitle.switch()
-                // reported no-op effect on every track change.
-                type: 'vtt',
-                encoding: 'utf-8',
-            } : {}),
+            type: 'vtt',          // 'webvtt' is not a value Artplayer knows
+            encoding: 'utf-8',
             // Artplayer paints cues with innerHTML: escape:true keeps file
             // text inert, and the 'subtitleAfterUpdate' hook below repaints
             // them through renderCuesSafely so <b>/<i>/<u> still render.
@@ -4100,24 +4233,17 @@
             }
         }
 
-        // What the CC menu marks active. null = "Off" — this used to fall back
-        // to track 0 (and the block-scoped pick was never visible here), so the
-        // menu showed "Track 1" while another track — or none — was on screen.
-        entry.currentSubIdx = initialSubIdx >= 0 ? initialSubIdx : null;
         // Subtitle offset: carried over by a restart, else the title's
         // remembered one (track defaults), else none.
         entry.subOffset = (restore && Number.isFinite(restore.subOffset)) ? restore.subOffset
             : (td && td.subtitleOffsetMs) ? Math.max(-SUB_OFFSET_MAX, Math.min(SUB_OFFSET_MAX, td.subtitleOffsetMs / 1000))
             : 0;
-        // A sidecar subtitle — restored by a restart or picked by the
-        // subtitle mode (embedded ones went in via the initial track above;
-        // Off simply loads none).
+        // The initial subtitle — an embedded track, a sidecar (restored by a
+        // restart or picked by the defaults) or Off — through the one place
+        // that picks its renderer. What the CC menu marks active follows.
         const extSubNow = restoredExtSub || pickedExtSub;
-        if (extSubNow) {
-            adapter.setSubtitle({ url: externalSubUrl(extSubNow.path), name: extSubNow.label, type: 'vtt' });
-            entry.currentSubIdx = null;
-            entry.currentExtSubPath = extSubNow.path;
-        }
+        applySubtitleChoice(entry, initialSubIdx >= 0 ? { idx: initialSubIdx }
+            : extSubNow ? { ext: extSubNow.path } : null);
 
         // Picture: Fit unless a restart carries the replaced stream's
         // mode / zoom / pan (and whether the user picked it) over, or the
@@ -4257,24 +4383,17 @@
                     // Each pick is remembered for the title (2.2): embedded by
                     // its s:N, a sidecar by its path, or Off.
                     if (i === 0) {
-                        adapter.setSubtitle(null);
-                        entry.currentSubIdx = null;
-                        entry.currentExtSubPath = null;
+                        applySubtitleChoice(entry, null);
                         queueTrackPrefs(elementId, { subtitle: { kind: 'off' } });
                         return;
                     }
                     const idx = i - 1;
                     if (idx < emb.length) {
-                        const s = emb[idx];
-                        adapter.setSubtitle({ url: s.url, name: s.name, type: 'vtt' });
-                        entry.currentSubIdx = idx;
-                        entry.currentExtSubPath = null;
+                        applySubtitleChoice(entry, { idx });
                         queueTrackPrefs(elementId, { subtitle: { kind: 'embedded', index: idx } });
                     } else {
                         const s = ext[idx - emb.length];
-                        adapter.setSubtitle({ url: externalSubUrl(s.path), name: s.label, type: 'vtt' });
-                        entry.currentSubIdx = null;
-                        entry.currentExtSubPath = s.path;
+                        applySubtitleChoice(entry, { ext: s.path });
                         queueTrackPrefs(elementId, { subtitle: { kind: 'external', path: s.path } });
                     }
                 });
@@ -4629,6 +4748,8 @@
                 });
             }
         } catch {}
+        entry.subToken = (entry.subToken || 0) + 1;   // a libass start still loading backs out
+        disposeSubRenderer(entry);
         if (entry.adapter) {
             entry.adapter.destroy();
             entry.adapter = null;

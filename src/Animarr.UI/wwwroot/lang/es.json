@@ -568,6 +568,7 @@
   "player.edge_none": "Ninguno",
   "player.unit_s": "s",
   "player.reset": "Restablecer",
+  "player.sub_styled_hint": "Esta pista se dibuja con sus propios estilos y fuentes ASS; el tamaño y el color se aplican a las pistas de texto simple.",
   "player.track_n": "Pista {0}",
   "player.track_default": "predeterminada",
   "player.track_forced": "forzados",

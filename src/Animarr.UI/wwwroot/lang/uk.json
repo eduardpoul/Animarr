@@ -568,6 +568,7 @@
   "player.edge_none": "Немає",
   "player.unit_s": "с",
   "player.reset": "Скинути",
+  "player.sub_styled_hint": "Ця доріжка малюється з власними стилями й шрифтами ASS; розмір і колір діють на звичайні текстові доріжки.",
   "player.track_n": "Доріжка {0}",
   "player.track_default": "типова",
   "player.track_forced": "форсовані",

@@ -569,6 +569,7 @@
   "player.edge_none": "Нет",
   "player.unit_s": "с",
   "player.reset": "Сбросить",
+  "player.sub_styled_hint": "Эта дорожка рисуется со своими стилями и шрифтами ASS; размер и цвет действуют на обычные текстовые дорожки.",
   "player.track_n": "Дорожка {0}",
   "player.track_default": "по умолчанию",
   "player.track_forced": "форсированные",

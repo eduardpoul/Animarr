@@ -1,0 +1,21 @@
+Third-party code served from this folder (self-hosted: the player works on a
+LAN / offline server, so nothing here comes from a CDN). Animarr is GPL-3.0;
+every licence below is compatible with it.
+
+jassub/ — JASSUB 2.5.18, https://github.com/ThaUnknown/jassub (libass in
+WebAssembly, styled ASS / SSA subtitles)
+  JASSUB itself: MIT (jassub/LICENSE).
+  Compiled into jassub-worker*.wasm, per the package's licence expression
+  "LGPL-2.1-or-later AND (FTL OR GPL-2.0-or-later) AND MIT AND
+  MIT-Modern-Variant AND ISC AND NTP AND Zlib AND BSL-1.0": libass (ISC),
+  FreeType (used under GPL-2.0-or-later), HarfBuzz (MIT), FriBidi
+  (LGPL-2.1-or-later — kept as the separate, replaceable .wasm file),
+  Brotli / zlib-style and Boost-licensed parts. default.woff2 is the fallback
+  font JASSUB ships (Liberation Sans, SIL OFL 1.1).
+  Bundled into jassub.js / jassub-worker.bundle.js with their dependencies:
+  abslink 1.3.0 (Apache-2.0), rvfc-polyfill 1.0.8 (GPL-3.0),
+  lfa-ponyfill 1.1.1 (MIT), throughput 1.0.2 (MIT).
+  jassub-worker.js is the package's emscripten glue, unchanged.
+
+Rebuild: npm install (the versions above, --ignore-scripts) and bundle with
+esbuild 0.28.2 (bundle, format=esm, minify, target=es2020, legalComments=eof).

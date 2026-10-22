@@ -568,6 +568,7 @@
   "player.edge_none": "Keiner",
   "player.unit_s": "s",
   "player.reset": "Zurücksetzen",
+  "player.sub_styled_hint": "Diese Spur wird mit ihren eigenen ASS-Stilen und Schriften gezeichnet; Größe und Farbe gelten für reine Textspuren.",
   "player.track_n": "Spur {0}",
   "player.track_default": "Standard",
   "player.track_forced": "erzwungen",

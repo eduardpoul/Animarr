@@ -51,6 +51,11 @@ html:has(.vp-backdrop) { overflow: hidden; }
     background: rgba(0,0,0,0.72);
 }
 
+/* JASSUB (libass) draws styled ASS into a canvas it inserts right after the
+   <video>, which Artplayer stacks at z-index 10: above the picture, under
+   Artplayer's text subtitles (20) and our HUD layer (30). */
+.vp-art .art-video-player canvas.JASSUB { z-index: 15; }
+
 /* Artplayer's own notices ("Switch Subtitle: …", "Subtitle Offset: …",
    "Rate: …") are English-only and duplicate what our HUD / popups already
    show; the player reports problems itself (toast / error panel). */
