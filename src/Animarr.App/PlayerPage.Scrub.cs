@@ -58,6 +58,7 @@ public partial class PlayerPage
     {
         _scrubFocused = focused;
         Scrubber.ScaleY = focused ? 2 : 1;
+        ScrubTrack.ScaleY = ChapterMarks.ScaleY = Scrubber.ScaleY;   // track + chapter gaps follow the bar
         Scrubber.ProgressColor = Color.FromArgb(focused ? "#f49157" : "#bb5000");
         ScrubThumb.IsVisible = focused;
         if (focused) PlaceThumb(Scrubber.Progress);

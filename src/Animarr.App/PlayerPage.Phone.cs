@@ -72,6 +72,7 @@ public partial class PlayerPage
         PipButton.IsVisible = OperatingSystem.IsAndroidVersionAtLeast(26);
         GearButton.IsVisible = true;
         Scrubber.IsVisible = false;
+        ScrubTrack.IsVisible = false;   // the Slider draws its own track
         ScrubSlider.IsVisible = true;
         ScrubRow.HeightRequest = 36;
         // Compact chrome for a phone held sideways.

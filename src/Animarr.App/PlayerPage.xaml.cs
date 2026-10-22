@@ -1933,6 +1933,8 @@ public partial class PlayerPage : ContentPage
     // when more than 3 s in). A file without chapters keeps ⏮ / ⏭ as they are.
 
     private List<ChapterDto> _chapters = new();
+    /// <summary>The seek bar's track height (dp) — a chapter gap spans it.</summary>
+    private const double ChapterGapHeight = 4;
 
     private async Task LoadChaptersAsync(string path)
     {
@@ -1955,23 +1957,23 @@ public partial class PlayerPage : ContentPage
         ChapterMarks.Children.Clear();
         double w = ChapterMarks.Width, dur = _durationMs / 1000.0;
         if (_chapters.Count < 2 || w <= 0 || dur <= 0) return;
-        // The phone's Slider draws its track inside the SeekBar's padding.
-        double pad = 0, top = Math.Max(0, (ScrubRow.Height - 12) / 2);
+        // A chapter is a small gap cut into the track, as in the web player —
+        // the 12 dp white ticks used to stick out of the 4 dp bar like a comb.
+        // The layer is scaled with the bar when it takes focus (OnScrubFocus).
+        double pad = 0, top = Math.Max(0, (ScrubRow.Height - ChapterGapHeight) / 2);
 #if ANDROID
+        // The phone's Slider draws its track inside the SeekBar's padding.
         if (ScrubSlider.IsVisible && ScrubSlider.Handler?.PlatformView is Android.Widget.SeekBar sb
             && sb.Resources?.DisplayMetrics?.Density is float density && density > 0)
-        {
             pad = sb.PaddingLeft / density;
-            top = (ScrubRow.Height - 12) / 2;
-        }
 #endif
         double track = w - 2 * pad;
         foreach (var c in _chapters.Skip(1))
         {
             if (c.StartSec <= 0 || c.StartSec >= dur) continue;
-            var tick = new BoxView { Color = Color.FromArgb("#E6FFFFFF"), WidthRequest = 2, HeightRequest = 12 };
-            AbsoluteLayout.SetLayoutBounds(tick, new Rect(pad + track * c.StartSec / dur - 1, top, 2, 12));
-            ChapterMarks.Children.Add(tick);
+            var gap = new BoxView { Color = Color.FromArgb("#D9080A0D"), WidthRequest = 2, HeightRequest = ChapterGapHeight };
+            AbsoluteLayout.SetLayoutBounds(gap, new Rect(pad + track * c.StartSec / dur - 1, top, 2, ChapterGapHeight));
+            ChapterMarks.Children.Add(gap);
         }
     }
 

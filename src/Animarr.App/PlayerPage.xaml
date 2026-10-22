@@ -138,6 +138,10 @@
                              phone drags a Slider instead of the TV's progress bar,
                              which is a D-pad stop with a thumb (PlayerPage.Scrub.cs) -->
                         <Grid x:Name="ScrubRow" Grid.Column="1" VerticalOptions="Center" HeightRequest="20">
+                            <!-- the unplayed track: the ProgressBar's own one all but
+                                 vanishes over the HUD gradient (web: ~30% white) -->
+                            <BoxView x:Name="ScrubTrack" Color="#4DFFFFFF" HeightRequest="4"
+                                     VerticalOptions="Center" InputTransparent="True" />
                             <ProgressBar x:Name="Scrubber" Progress="0"
                                          ProgressColor="#bb5000" VerticalOptions="Center" />
                             <Slider x:Name="ScrubSlider" IsVisible="False" Minimum="0" Maximum="1"
