@@ -56,6 +56,8 @@ public partial class PlayerPage : ContentPage
     /// and the bit depth the server sends, for the ⓘ line.</summary>
     private string? _outputPlan;
     private int _outputBitDepth;
+    /// <summary>HLS segmentation of the current stream ("keyframe" / "grid").</summary>
+    private string? _outputSegmentation;
 
     // Playback timeline. All three tiers expose ExoPlayer positions on the file's
     // absolute runtime — Direct Play natively, the Direct Stream remux via absolute
@@ -568,7 +570,12 @@ public partial class PlayerPage : ContentPage
                       BurnStartParam() + "&usePrefs=1&localTracks=1" +
                       // What the audio output plays: ≥ 6 keeps 5.1 when the
                       // server has to transcode the audio.
-                      $"&maxAudioChannels={Services.TvCodecCaps.MaxAudioChannels()}";
+                      $"&maxAudioChannels={Services.TvCodecCaps.MaxAudioChannels()}" +
+                      // A needed remux (the container or the audio, not the
+                      // video) as the key-frame-exact HLS copy rather than the
+                      // /api/video pipe, where every seek was a reload. An
+                      // older server ignores it and still answers Direct Stream.
+                      "&remux=hls";
             if (!_forceTranscode && !Bench.BenchLog.Has("nocaps"))
             {
                 var caps = Services.TvCodecCaps.Get();
@@ -719,9 +726,11 @@ public partial class PlayerPage : ContentPage
         _streamFilePath = _filePath;
         _outputPlan = b.Output?.Plan;
         _outputBitDepth = b.Output?.BitDepth ?? 0;
+        _outputSegmentation = b.Output?.Segmentation;
         _maxHeight = maxHeight;
         _kind = directPlay ? StreamKind.DirectPlay : directStream ? StreamKind.DirectStream : StreamKind.Hls;
-        Log($"start #{gen}: {_kind} plan={b.Output?.Plan}");
+        Log($"start #{gen}: {_kind} plan={b.Output?.Plan}" +
+            (b.Output?.Segmentation is { } seg ? $" segmentation={seg}" : ""));
         // Only a start the server was free to Direct Play tells whether it can
         // (track 0 named explicitly doesn't change that).
         if (maxHeight == 0 && trackParams is "" or "&audioTrackIndex=0" && capsSent && !burning)
@@ -2598,7 +2607,8 @@ public partial class PlayerPage : ContentPage
         {
             StreamKind.DirectPlay   => "Direct Play",
             StreamKind.DirectStream => "Direct Stream",
-            StreamKind.Hls          => string.IsNullOrEmpty(_outputPlan) ? "HLS" : $"HLS {_outputPlan}",
+            StreamKind.Hls          => (string.IsNullOrEmpty(_outputPlan) ? "HLS" : $"HLS {_outputPlan}")
+                                       + (_outputSegmentation == "keyframe" ? " (по ключевым кадрам)" : ""),
             _                       => "",
         });
         if (Math.Abs(_speed - 1f) > 0.01f) parts.Add(SpeedText(_speed));
@@ -2783,7 +2793,10 @@ public partial class PlayerPage : ContentPage
         double? TotalDuration, double? ResumeSec, string? Token, StartOutput? Output,
         TrackDefaultsDto? TrackDefaults = null);
 
-    private sealed record StartOutput(string? Plan, string? VideoCodec, int BitDepth, int Width, int Height);
+    /// <param name="Segmentation">HLS: "keyframe" (segments cut on the file's
+    /// key frames — the remux copy) or "grid" (4 s, a re-encode).</param>
+    private sealed record StartOutput(string? Plan, string? VideoCodec, int BitDepth, int Width, int Height,
+                                      string? Segmentation = null);
 
     /// <summary>/api/hls/start error body (ProblemDetails + `code`).</summary>
     private sealed record StartProblem(string? Title, string? Detail, int? Status, string? Code);
