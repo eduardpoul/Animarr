@@ -170,6 +170,18 @@ public sealed partial class HlsSessionService : IDisposable
 
         public override string ToString()
             => $"user={(string.IsNullOrEmpty(UserId) ? "-" : UserId)} client={(string.IsNullOrEmpty(ClientId) ? "-" : ClientId)}";
+
+        /// <summary>The device part of <see cref="ClientId"/> — without the
+        /// "/role" suffix a second player on the same device gets
+        /// (<c>client=external</c>: the phone's external player).</summary>
+        public string Device => ClientId.IndexOf('/') is int i and >= 0 ? ClientId[..i] : ClientId;
+
+        /// <summary>This owner with a player role: its own owner for the
+        /// same-file dedup, still this device for the cap's eviction order.</summary>
+        public SessionOwner WithRole(string role) => this with { ClientId = Device + "/" + role };
+
+        /// <summary>Same account on the same device (any player role).</summary>
+        public bool SameDevice(SessionOwner other) => UserId == other.UserId && Device == other.Device;
     }
 
     /// <summary>Lowest / highest accepted <c>maxHeight</c> cap (0 = no cap).</summary>
@@ -919,8 +931,9 @@ public sealed partial class HlsSessionService : IDisposable
         while (_sessions.Count - _sessions.Keys.Count(replacing.Contains) >= MaxConcurrentSessions)
         {
             var idleCutoff = DateTime.UtcNow - ActiveSessionGrace;
+            // "Own" = this device, whichever of its players (role) started it.
             var victim = _sessions
-                .Where(kv => kv.Value.Owner == who && !replacing.Contains(kv.Key))
+                .Where(kv => kv.Value.Owner.SameDevice(who) && !replacing.Contains(kv.Key))
                 .OrderBy(kv => kv.Value.LastActive)
                 .Select(kv => kv.Key)
                 .FirstOrDefault()

@@ -109,6 +109,13 @@ internal static class HlsEndpoints
             // (the TV's Media3): a remembered embedded track then keeps Direct
             // Play and is only reported. Elsewhere the server still maps it.
             string? localTracks,
+            // A second player on the same device, e.g. "external" — the phone's
+            // "open in an external player" (VLC / mpv / MX) start. Its session
+            // gets its own owner (device id + "/external"): it neither replaces
+            // nor is replaced by the app player's session for the same file,
+            // and still counts as this device's for the cap's eviction order.
+            // A short token [a-z0-9-]; absent = the app's own player.
+            [Microsoft.AspNetCore.Mvc.FromQuery(Name = "client")] string? clientRole,
             // "1" = audio as separate HLS renditions (task 6.3): a video-only
             // stream + one EXT-X-MEDIA TYPE=AUDIO playlist per embedded track and
             // external dub, switched live (hls.audioTrack / Media3 track
@@ -201,6 +208,8 @@ internal static class HlsEndpoints
             // POST /api/playback/failure): the tiers it failed on for this kind
             // of stream are skipped, the audio codecs it failed on transcoded.
             var owner = await SessionOwnerAsync(http, deviceTrust);
+            if (clientRole is { Length: > 0 and <= 16 } role && role.All(ch => ch is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '-'))
+                owner = owner.WithRole(role);
             var steps = failures.StepsFor(owner.ClientId, await hls.DecodeSignatureAsync(fullPath!, http.RequestAborted));
             var naturalClient = client;
             client = client.WithoutAudio(steps.TranscodeAudio);
