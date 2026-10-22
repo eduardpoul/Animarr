@@ -58,6 +58,12 @@ public sealed class TrackPreferenceService
     private const int MaxAudioOffsetMs    = 3_000;
     private const int MaxSubtitleOffsetMs = 600_000;
 
+    /// <summary>What <see cref="TrackPrefsUpdateRequest.Clear"/> may name:
+    /// "audioOffset" = the offset of the request's / current audio,
+    /// "audioOffsets" = every remembered audio offset.</summary>
+    private static readonly string[] ClearableFacets =
+        ["audio", "subtitle", "audioOffset", "audioOffsets", "subtitleOffset", "aspect"];
+
     // ─── File → title ─────────────────────────────────────────────────────────
 
     /// <summary>The title a library file belongs to and its season.</summary>
@@ -606,10 +612,21 @@ public sealed class TrackPreferenceService
             subPick = new TrackSubtitlePrefDto(KindExternal, x.Language, x.SubtitleType ?? "full", null, x.GroupKey);
         }
 
+        // "clear": facets to forget (back to the defaults) — applied after the
+        // values of this request, so clearing wins over setting the same facet.
+        var clear = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in req.Clear ?? [])
+        {
+            var name = c?.Trim() ?? "";
+            if (!ClearableFacets.Contains(name, StringComparer.OrdinalIgnoreCase))
+                return UpdateResult.Fail(400, $"clear accepts {string.Join(", ", ClearableFacets)} (got \"{name}\").");
+            clear.Add(name);
+        }
+
         // The audio an offset belongs to: this request's pick, else what the
         // file plays now for this profile, else the row's remembered audio.
         string? offsetKey = null;
-        if (req.AudioOffsetMs is not null)
+        if (req.AudioOffsetMs is not null || clear.Contains("audioOffset"))
         {
             if (audioPick is not null) offsetKey = AudioKey(audioPick.Kind, audioPick.Language, audioPick.GroupKey);
             else if (videoFullPath is not null && (await ResolveAsync(userId, videoFullPath, ct)).Audio is { } cur)
@@ -641,22 +658,34 @@ public sealed class TrackPreferenceService
                 (row.SubtitleKind, row.SubtitleLanguage, row.SubtitleType, row.SubtitleTitle, row.SubtitleGroupKey)
                     = (subPick.Kind, subPick.Language, subPick.Type, subPick.Title, subPick.GroupKey);
 
+            // Values are stored as given — an explicit 0 is remembered as 0
+            // (it beats a dub's DELAY tag); forgetting is "clear".
             if (req.SubtitleOffsetMs is int so)
-                row.SubtitleOffsetMs = so == 0 ? null : Math.Clamp(so, -MaxSubtitleOffsetMs, MaxSubtitleOffsetMs);
+                row.SubtitleOffsetMs = Math.Clamp(so, -MaxSubtitleOffsetMs, MaxSubtitleOffsetMs);
 
-            if (req.AudioOffsetMs is int ao)
+            if (req.AudioOffsetMs is not null || clear.Contains("audioOffset"))
             {
                 var key = offsetKey ?? (row.AudioKind is string k ? AudioKey(k, row.AudioLanguage, row.AudioGroupKey) : null);
                 if (key is null)
-                    return UpdateResult.Fail(400, "audioOffsetMs needs an audio track: send audio or path.");
+                    return UpdateResult.Fail(400, "audioOffsetMs / clear audioOffset needs an audio track: send audio or path.");
                 var offsets = ReadOffsets(row.AudioOffsetsJson);
-                if (ao == 0) offsets.Remove(key);
-                else offsets[key] = Math.Clamp(ao, -MaxAudioOffsetMs, MaxAudioOffsetMs);
+                if (req.AudioOffsetMs is int ao) offsets[key] = Math.Clamp(ao, -MaxAudioOffsetMs, MaxAudioOffsetMs);
+                if (clear.Contains("audioOffset")) offsets.Remove(key);
                 row.AudioOffsetsJson = offsets.Count == 0 ? null : JsonSerializer.Serialize(offsets);
             }
 
             if (req.Aspect is not null)
-                row.Aspect = req.Aspect.Length == 0 ? null : req.Aspect;
+                row.Aspect = req.Aspect.Length == 0 ? null : req.Aspect;   // "" = clear (older clients)
+
+            if (clear.Contains("audio"))
+                (row.AudioKind, row.AudioLanguage, row.AudioTitle, row.AudioCodec, row.AudioChannels, row.AudioGroupKey)
+                    = (null, null, null, null, null, null);
+            if (clear.Contains("subtitle"))
+                (row.SubtitleKind, row.SubtitleLanguage, row.SubtitleType, row.SubtitleTitle, row.SubtitleGroupKey)
+                    = (null, null, null, null, null);
+            if (clear.Contains("subtitleOffset")) row.SubtitleOffsetMs = null;
+            if (clear.Contains("audioOffsets"))   row.AudioOffsetsJson = null;
+            if (clear.Contains("aspect"))         row.Aspect = null;
 
             row.UpdatedAt = DateTime.UtcNow;
             bool empty = row.AudioKind is null && row.SubtitleKind is null && row.SubtitleOffsetMs is null

@@ -10,24 +10,34 @@ namespace Animarr.Shared.Models;
 
 /// <summary>
 /// Partial update of a title's track memory: only the members that are
-/// present (non-null) change. The client names WHAT it picked on WHICH file;
+/// present (non-null) change; values are stored as given — an explicit 0 is
+/// remembered as 0. Forgetting a facet (back to the defaults) is
+/// <paramref name="Clear"/>. The client names WHAT it picked on WHICH file;
 /// the server derives the meaning (language, title, dub group) itself.
 /// </summary>
 /// <param name="Path">The video the choice was made on — required with
 /// <paramref name="Audio"/> / <paramref name="Subtitle"/> choices other than
 /// "off" / "auto", and must belong to the title.</param>
-/// <param name="SubtitleOffsetMs">Subtitle delay (positive = later); 0 clears.</param>
-/// <param name="AudioOffsetMs">Sync offset of the audio picked in this request
-/// (or, without one, of the audio <paramref name="Path"/> currently resolves
-/// to); 0 clears.</param>
-/// <param name="Aspect">Aspect / zoom preset; "" clears.</param>
+/// <param name="SubtitleOffsetMs">Subtitle delay (positive = later), ±600000.</param>
+/// <param name="AudioOffsetMs">Sync offset (ms, + = the sound later, ±3000) of
+/// the audio picked in this request (or, without one, of the audio
+/// <paramref name="Path"/> currently resolves to, else the remembered audio).
+/// 0 is stored — it overrides a dub's <c>DELAY Nms</c>.</param>
+/// <param name="Aspect">Aspect / zoom preset (≤ 32 chars of letters, digits,
+/// ':', '.', '-', '_'); "" clears (kept for older clients).</param>
+/// <param name="Clear">Facets to forget, applied after the values above (so
+/// clearing wins): "audio", "subtitle", "audioOffset" (of the same audio
+/// <paramref name="AudioOffsetMs"/> would target — a dub falls back to its
+/// DELAY tag), "audioOffsets" (all of them), "subtitleOffset", "aspect".
+/// <c>audio.kind = "auto"</c> / <c>subtitle.kind = "auto"</c> still forget too.</param>
 public sealed record TrackPrefsUpdateRequest(
     string? Path = null,
     TrackChoiceRequest? Audio = null,
     TrackChoiceRequest? Subtitle = null,
     int? SubtitleOffsetMs = null,
     int? AudioOffsetMs = null,
-    string? Aspect = null);
+    string? Aspect = null,
+    IReadOnlyList<string>? Clear = null);
 
 /// <summary>One track pick.</summary>
 /// <param name="Kind">"embedded" (+ <paramref name="Index"/>), "external"
