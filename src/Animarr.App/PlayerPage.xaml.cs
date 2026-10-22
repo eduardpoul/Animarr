@@ -852,6 +852,8 @@ public partial class PlayerPage : ContentPage
     private List<ProbeTrack> _probeSubs = new();
     private List<ExternalTrackDto> _extAudio = new();
     private List<ExternalTrackDto> _extSubs = new();
+    /// <summary>Sidecar image subtitles (.sup / .idx): no WebVTT, only burned in.</summary>
+    private List<ExternalTrackDto> _extImageSubs = new();
     private bool _probeOk;
     private string? _catalogPath;
     private Task _catalogTask = Task.CompletedTask;
@@ -860,7 +862,7 @@ public partial class PlayerPage : ContentPage
     {
         if (string.Equals(_catalogPath, _filePath, StringComparison.Ordinal)) return _catalogTask;
         _catalogPath = _filePath;
-        _probeAudio = new(); _probeSubs = new(); _extAudio = new(); _extSubs = new();
+        _probeAudio = new(); _probeSubs = new(); _extAudio = new(); _extSubs = new(); _extImageSubs = new();
         _probeOk = false;
         _subNeedsServer.Clear();
         _audioNeedsServer.Clear();
@@ -922,6 +924,7 @@ public partial class PlayerPage : ContentPage
         // /api/subtitle converts text formats only (a .sup / .idx can't become WebVTT).
         _extSubs = ext.Where(e => e.Kind == "subtitle" && e.Ext?.ToLowerInvariant()
                        is "srt" or "ass" or "ssa" or "vtt" or "webvtt" or "sub" or "smi" or "txt").ToList();
+        _extImageSubs = ext.Where(e => e.Kind == "subtitle" && e.Ext?.ToLowerInvariant() is "sup" or "idx").ToList();
         Log($"catalog: {audio.Count} audio, {subs.Count} subs, {_extAudio.Count} ext audio, {_extSubs.Count} ext subs");
 
         // A stream of THIS file that started before the catalog arrived: pick
@@ -1390,17 +1393,25 @@ public partial class PlayerPage : ContentPage
 
     /// <summary>Subtitle choice: embedded track #Embedded (ffprobe subtitle
     /// order), a sidecar file, or off.</summary>
-    /// <param name="Burn">Embedded track drawn into the picture by the server
-    /// (burnSubtitle=N, an HLS re-encode) — an image track (PGS / VobSub /
-    /// DVB) on a tier where Media3 can't render it.</param>
+    /// <param name="Burn">Drawn into the picture by the server (an HLS
+    /// re-encode): an embedded image track (PGS / VobSub / DVB) on a tier
+    /// where Media3 can't render it (burnSubtitle=N), or a sidecar image file
+    /// — .sup / .idx (burnSubtitlePath=).</param>
     private readonly record struct SubSel(int Embedded, string? External, bool Burn = false)
     {
         public static SubSel Off => new(-1, null);
         public bool IsOff => Embedded < 0 && External is null;
     }
 
-    /// <summary>The start parameter for a burned-in subtitle ("" otherwise).</summary>
-    private string BurnStartParam() => _sub is { Burn: true, Embedded: >= 0 } b ? $"&burnSubtitle={b.Embedded}" : "";
+    /// <summary>The start parameter for a burned-in subtitle ("" otherwise): an
+    /// embedded track (burnSubtitle=N) or a sidecar file — .sup / .idx overlaid,
+    /// a text file rendered by libass (burnSubtitlePath=).</summary>
+    private string BurnStartParam() => _sub switch
+    {
+        { Burn: true, External: { } file } => $"&burnSubtitlePath={Uri.EscapeDataString(file)}",
+        { Burn: true, Embedded: >= 0 } b   => $"&burnSubtitle={b.Embedded}",
+        _                                  => "",
+    };
 
     /// <summary>null = not decided for this file yet (catalog not loaded).</summary>
     private SubSel? _sub;
@@ -1500,46 +1511,23 @@ public partial class PlayerPage : ContentPage
             _ = VerifySubThenReloadAsync(rel, s);
             return (null, false);
         }
-        // With an offset: a time-shifted local copy of the server's WebVTT
-        // (Media3 has no cue offset, /api/subtitle no shift parameter).
-        var url = _subOffsetMs != 0 && ShiftedSubtitleFile(rel) is { } local ? local : TvMedia.Url(Abs(rel)!);
-        return (new SideloadSubtitle(url, SubLang(s), SubLabel(s)), true);
+        // With an offset the server shifts every cue (offsetMs, + = later;
+        // Media3 has no cue offset of its own). The check above ran on the
+        // unshifted URL — the conversion is the same, cached on the server.
+        var shifted = _subOffsetMs != 0 ? rel + $"&offsetMs={_subOffsetMs}" : rel;
+        return (new SideloadSubtitle(TvMedia.Url(Abs(shifted)!), SubLang(s), SubLabel(s)), true);
     }
 
     /// <summary>Media3 renders this embedded track itself (Direct Play, a
     /// renderer for its codec) — text tracks only while there's no offset:
-    /// an offset needs the server's WebVTT, shifted here.</summary>
+    /// an offset needs the server's WebVTT, shifted there.</summary>
     private bool MediaRendersSub(SubSel s, bool directPlay) =>
         directPlay && s.External is null && !_subNeedsServer.Contains(s.Embedded)
         && !(_subOffsetMs != 0 && IsTextSub(s));
 
     private bool IsTextSub(SubSel s) =>
-        s.External is not null || (s.Embedded >= 0 && s.Embedded < _probeSubs.Count && TrackLabels.IsTextSubtitle(_probeSubs[s.Embedded].Codec));
-
-    /// <summary>/api/subtitle bodies already fetched (the convert check reads them).</summary>
-    private readonly Dictionary<string, string> _subBodies = new(StringComparer.Ordinal);
-
-    /// <summary>file:// URI of the WebVTT behind <paramref name="rel"/> with every
-    /// cue moved by the offset (later for +); null when the body isn't here.</summary>
-    private string? ShiftedSubtitleFile(string rel)
-    {
-        if (!_subBodies.TryGetValue(rel, out var body)) return null;
-        try
-        {
-            var dir = System.IO.Path.Combine(FileSystem.CacheDirectory, "subs");
-            System.IO.Directory.CreateDirectory(dir);
-            var name = $"{Services.TrackLabels.StableHash(rel):x8}_{_subOffsetMs}.vtt";
-            var file = System.IO.Path.Combine(dir, name);
-            if (!System.IO.File.Exists(file))
-            {
-                foreach (var old in System.IO.Directory.GetFiles(dir, $"{Services.TrackLabels.StableHash(rel):x8}_*.vtt"))
-                    try { System.IO.File.Delete(old); } catch { }
-                System.IO.File.WriteAllText(file, Services.TrackLabels.ShiftWebVtt(body, _subOffsetMs));
-            }
-            return new Uri(file).AbsoluteUri;
-        }
-        catch (Exception ex) { Log($"subtitle shift: {ex.Message}"); return null; }
-    }
+        !s.Burn && (s.External is not null
+                    || (s.Embedded >= 0 && s.Embedded < _probeSubs.Count && TrackLabels.IsTextSubtitle(_probeSubs[s.Embedded].Codec)));
 
     private readonly Dictionary<string, Task<bool>> _subChecks = new(StringComparer.Ordinal);
 
@@ -1577,7 +1565,6 @@ public partial class PlayerPage : ContentPage
             var body = await resp.Content.ReadAsStringAsync(cts.Token);
             if (string.IsNullOrWhiteSpace(body)) return false;
             _goodSubs.Add(rel);
-            _subBodies[rel] = body;   // an offset is applied to a copy of it
             return true;
         }
         catch (Exception ex) { Log($"subtitle {rel}: {ex.Message}"); return false; }
@@ -1662,7 +1649,8 @@ public partial class PlayerPage : ContentPage
     {
         if (s.IsOff) return "Выключены";
         if (s.External is { } p)
-            return _extSubs.FirstOrDefault(x => x.Path == p) is { } x ? ExternalLabel(x) : FileName(p);
+            return (_extSubs.FirstOrDefault(x => x.Path == p) ?? _extImageSubs.FirstOrDefault(x => x.Path == p)) is { } x
+                ? ExternalLabel(x) : FileName(p);
         if (s.Embedded < _probeSubs.Count)
         {
             var t = _probeSubs[s.Embedded];
@@ -1689,7 +1677,8 @@ public partial class PlayerPage : ContentPage
     }
 
     private static string DescribeSub(SubSel s) =>
-        s.IsOff ? "off" : s.External is { } p ? $"external {FileName(p)}" : $"embedded #{s.Embedded}{(s.Burn ? " (burned in)" : "")}";
+        s.IsOff ? "off" : s.External is { } p ? $"external {FileName(p)}{(s.Burn ? " (burned in)" : "")}"
+        : $"embedded #{s.Embedded}{(s.Burn ? " (burned in)" : "")}";
 
     /// <summary>Apply the current choice to the playing stream (CC sheet, or
     /// a default picked after the stream started).</summary>
@@ -2570,6 +2559,17 @@ public partial class PlayerPage : ContentPage
         {
             var sel = new SubSel(-1, x.Path);
             rows.Add(new SheetRow(ExternalLabel(x), cur == sel, () => ChooseSub(sel)));
+            if (Bench.BenchLog.Has("burnall"))
+            {
+                var burn = new SubSel(-1, x.Path, Burn: true);
+                rows.Add(new SheetRow($"{ExternalLabel(x)} · вжечь в картинку", cur == burn, () => ChooseSub(burn)));
+            }
+        }
+        // A .sup / .idx next to the file: the server draws it into the picture.
+        foreach (var x in _extImageSubs)
+        {
+            var burn = new SubSel(-1, x.Path, Burn: true);
+            rows.Add(new SheetRow($"{ExternalLabel(x)} · вжечь в картинку", cur == burn, () => ChooseSub(burn)));
         }
         if (!_catalogTask.IsCompleted) rows.Add(new SheetRow("Загрузка списка…", false, null));
         // Offset (remembered for the title) and the device's look.
