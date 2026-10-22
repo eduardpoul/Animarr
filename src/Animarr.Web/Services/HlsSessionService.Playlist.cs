@@ -227,6 +227,7 @@ public sealed partial class HlsSessionService
     private static long LadderKbps(int h) => h switch
     {
         <= 0    => 12_000,   // unknown → 1080-ish default
+        <= 360  => 1_500,    // (360p used to fall on the 480p rung's 2.5 Mbps)
         <= 480  => 2_500,
         <= 576  => 3_500,
         <= 720  => 6_000,
