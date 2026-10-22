@@ -205,7 +205,7 @@ public sealed class TrackPreferenceService
         // Text sidecars before bitmap ones (.sup / .idx), like the embedded picks.
         var extSubs  = external.Where(t => t.Kind == "subtitle").OrderBy(t => t.Image == true ? 1 : 0).ToList();
         var audio    = ResolveAudio(embedded.Audio, extAudio, seasonRow, titleRow, profile);
-        var subtitle = ResolveSubtitle(embedded.Subtitles, extSubs, seasonRow, titleRow, profile);
+        var subtitle = ResolveSubtitle(embedded.Subtitles, extSubs, seasonRow, titleRow, profile, audio?.Language);
 
         var offsets = ReadOffsets(titleRow?.AudioOffsetsJson);
         foreach (var (k, v) in ReadOffsets(seasonRow?.AudioOffsetsJson)) offsets[k] = v;
@@ -255,8 +255,24 @@ public sealed class TrackPreferenceService
         return emb.Count > 0 ? Audio(emb[0], "first") : Audio(ext[0], "first");
     }
 
+    /// <summary>
+    /// Subtitle defaults. <see cref="UserPreferences.SubtitlePreferredLanguage"/>
+    /// is a language ("Always" in the settings: that language, else the file's
+    /// flags, else the first track) or one of three modes — the same four the
+    /// web player and the TV offer:
+    /// <list type="bullet">
+    /// <item>"Off" — none;</item>
+    /// <item>"Forced" — a forced / signs track (one in the audio's language
+    ///   first), else none;</item>
+    /// <item>"Default" — what the file flags: its default track, else a
+    ///   forced / signs track in the audio's language (a foreign-language
+    ///   scene), else none.</item>
+    /// </list>
+    /// <paramref name="audioLanguage"/> is the language of the audio the start
+    /// resolved to.
+    /// </summary>
     private static TrackDefaultSubtitleDto ResolveSubtitle(List<EmbeddedTrack> emb, List<ExternalTrackDto> ext,
-        TrackPreference? seasonRow, TrackPreference? titleRow, UserPreferences? profile)
+        TrackPreference? seasonRow, TrackPreference? titleRow, UserPreferences? profile, string? audioLanguage)
     {
         foreach (var (row, source) in new[] { (seasonRow, "memory-season"), (titleRow, "memory") })
         {
@@ -265,16 +281,32 @@ public sealed class TrackPreferenceService
             if (MatchSubtitle(emb, ext, row) is { } hit) return hit with { Source = source };
         }
 
+        // A forced / signs track in the audio's language (embedded first).
+        TrackDefaultSubtitleDto? ForcedInAudioLanguage()
+        {
+            if (audioLanguage is null) return null;
+            var e = TextFirst(emb).FirstOrDefault(t => t.Language == audioLanguage && SubType(t) != "full");
+            if (e is not null) return Subtitle(e, "profile");
+            var x = ext.FirstOrDefault(t => t.Language == audioLanguage && t.SubtitleType is "forced" or "signs");
+            return x is not null ? Subtitle(x, "profile") : null;
+        }
+
         if (profile is not null)
         {
             var pref = profile.SubtitlePreferredLanguage?.Trim();
             if (string.Equals(pref, "Off", StringComparison.OrdinalIgnoreCase)) return Off("profile");
             if (string.Equals(pref, "Forced", StringComparison.OrdinalIgnoreCase))
             {
+                if (ForcedInAudioLanguage() is { } inAudio) return inAudio;
                 var forced = TextFirst(emb).FirstOrDefault(t => SubType(t) != "full");
                 if (forced is not null) return Subtitle(forced, "profile");
                 var forcedExt = ext.FirstOrDefault(t => t.SubtitleType is "forced" or "signs");
                 return forcedExt is not null ? Subtitle(forcedExt, "profile") : Off("profile");
+            }
+            if (string.Equals(pref, "Default", StringComparison.OrdinalIgnoreCase))
+            {
+                if (TextFirst(emb).FirstOrDefault(t => t.IsDefault) is { } flagged) return Subtitle(flagged, "default");
+                return ForcedInAudioLanguage() ?? Off("profile");
             }
             if (PreferredLanguage(pref) is string lang)
             {
