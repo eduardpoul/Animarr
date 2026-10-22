@@ -67,7 +67,7 @@ public static class MatroskaInspector
                     case SeekHeadId:
                         seeks.AddRange(ReadSeekHead(fs, dataStart + sz));
                         break;
-                    case TracksId when sz <= MaxTracksBytes:
+                    case TracksId when sz <= MaxTracksBytes && sz <= fs.Length - dataStart:
                         var buf = new byte[sz];
                         fs.ReadExactly(buf);
                         compressed |= TracksCompressed(buf);
@@ -97,7 +97,7 @@ public static class MatroskaInspector
             return new Result(hasCues, compressed);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or EndOfStreamException
-                                       or ArgumentException or OverflowException)
+                                       or ArgumentException or OverflowException or OutOfMemoryException)
         {
             return null;
         }
@@ -118,7 +118,11 @@ public static class MatroskaInspector
                 while (s.Position < next)
                 {
                     var cid = ReadId(s);
-                    if (ReadSize(s) is not long cs || cid == 0) break;
+                    if (ReadSize(s) is not long cs || cid == 0 || cs < 0) break;
+                    // SeekID / SeekPosition are ≤ 8 bytes; anything bigger (a
+                    // garbage size from a damaged file) is skipped, never
+                    // allocated.
+                    if (cs > 8 || cs > s.Length - s.Position) { s.Seek(Math.Min(s.Length, s.Position + cs), SeekOrigin.Begin); continue; }
                     var data = new byte[cs];
                     s.ReadExactly(data);
                     if (cid == SeekIdId) target = (uint)ReadUInt(data);

@@ -32,6 +32,9 @@ public sealed class KeyframeIndexService
 {
     private const int MaxEntries = 256;
     private static readonly TimeSpan ScanTimeout = TimeSpan.FromMinutes(15);
+    /// <summary>A container index is a few KB of reads; past this the file is
+    /// pathological (or the parse is) and it falls back to the scan.</summary>
+    private static readonly TimeSpan ParseTimeout = TimeSpan.FromSeconds(10);
 
     private readonly ILogger<KeyframeIndexService> _logger;
     private readonly string? _diskDir;
@@ -56,7 +59,11 @@ public sealed class KeyframeIndexService
         try { fi = new FileInfo(fullPath); if (!fi.Exists) return null; }
         catch { return null; }
         var key = $"{fullPath}|{fi.LastWriteTimeUtc.Ticks}|{fi.Length}|{videoStreamIndex}|kf1";
-        if (_slots.Count > MaxEntries) _slots.Clear();
+        // Evict finished entries only: clearing a slot whose build still runs
+        // started a second scan of the same file on the next request.
+        if (_slots.Count > MaxEntries)
+            foreach (var (k, v) in _slots)
+                if (v.IsValueCreated && v.Value.IsCompleted) _slots.TryRemove(k, out _);
         var slot = _slots.GetOrAdd(key, k => new Lazy<Task<KeyframeIndex?>>(() => Task.Run(() => BuildAsync(fullPath, videoStreamIndex, k))));
         var task = slot.Value;
         try
@@ -85,10 +92,11 @@ public sealed class KeyframeIndexService
         var ext = Path.GetExtension(fullPath).ToLowerInvariant();
         try
         {
+            using var limit = new CancellationTokenSource(ParseTimeout);
             index = ext switch
             {
-                ".mkv" or ".mk3d" or ".webm" => MatroskaCues.Read(fullPath, videoStreamIndex),
-                ".mp4" or ".m4v" or ".mov" => Mp4SyncSamples.Read(fullPath, videoStreamIndex),
+                ".mkv" or ".mk3d" or ".webm" => MatroskaCues.Read(fullPath, videoStreamIndex, limit.Token),
+                ".mp4" or ".m4v" or ".mov" => Mp4SyncSamples.Read(fullPath, videoStreamIndex, limit.Token),
                 _ => null,
             };
         }
@@ -191,6 +199,12 @@ public sealed class KeyframeIndexService
 /// (mkvmerge and ffmpeg's muxer write one per video key frame). Reads the EBML
 /// header, the SeekHead / Info / Tracks and the Cues element only — never the
 /// Clusters. null when the file has no usable Cues.
+///
+/// The file is untrusted input (a torrent cut off mid-Cues, garbage): every
+/// element end is clamped to the file's end, a header that reads as garbage /
+/// EOF / an unknown size ends the walk of its level, every loop is bounded and
+/// the caller's token (a time limit) is checked as it goes — a truncated file
+/// used to spin forever on a zero-length read at EOF.
 /// </summary>
 internal static class MatroskaCues
 {
@@ -199,30 +213,70 @@ internal static class MatroskaCues
         IdTrackEntry = 0xAE, IdTrackNumber = 0xD7, IdTrackType = 0x83, IdCues = 0x1C53BB6B, IdCuePoint = 0xBB,
         IdCueTime = 0xB3, IdCueTrackPositions = 0xB7, IdCueTrack = 0xF7, IdCluster = 0x1F43B675;
 
-    public static KeyframeIndex? Read(string path, int videoStreamIndex)
+    /// <summary>Most elements one parse looks at (a 3-hour film's Cues are ~100k).</summary>
+    private const int MaxElements = 4_000_000;
+
+    private sealed class Walk(FileStream fs, CancellationToken ct)
+    {
+        public readonly FileStream Fs = fs;
+        private int _elements;
+        /// <summary>An element ran past its parent / the file and was cut short.</summary>
+        public bool Clamped;
+
+        /// <summary>
+        /// The next element header before <paramref name="end"/> (clamped to the
+        /// file's end): its id, where its data starts and where it ends (also
+        /// clamped). False at the end, on EOF / garbage / an unknown size, and
+        /// past the element budget.
+        /// </summary>
+        public bool Next(long end, out uint id, out long dataPos, out long next)
+        {
+            dataPos = next = 0;
+            id = 0;
+            end = Math.Min(end, Fs.Length);
+            long start = Fs.Position;
+            if (start >= end || ++_elements > MaxElements) return false;
+            if ((_elements & 0xFFF) == 0) ct.ThrowIfCancellationRequested();
+            id = ReadId(Fs);
+            if (id == 0) return false;
+            long size = ReadSize(Fs, out bool unknown);
+            if (unknown || size < 0) return false;
+            dataPos = Fs.Position;
+            if (dataPos > end) return false;
+            if (size > end - dataPos) { next = end; Clamped = true; }
+            else next = dataPos + size;
+            return true;
+        }
+    }
+
+    public static KeyframeIndex? Read(string path, int videoStreamIndex, CancellationToken ct = default)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024);
+        var w = new Walk(fs, ct);
         // EBML header, then the Segment.
-        if (ReadId(fs) != 0x1A45DFA3) return null;
-        var hdrSize = ReadSize(fs, out _);
-        fs.Seek(hdrSize, SeekOrigin.Current);
-        if (ReadId(fs) != IdSegment) return null;
-        ReadSize(fs, out _);
-        long segStart = fs.Position;
+        if (!w.Next(fs.Length, out var ebml, out _, out var ebmlEnd) || ebml != 0x1A45DFA3) return null;
+        fs.Position = ebmlEnd;
+        long segStart, segEnd;
+        {
+            // The Segment's size may be "unknown" (live-muxed): then it runs to EOF.
+            if (ReadId(fs) != IdSegment) return null;
+            long segSize = ReadSize(fs, out bool unknownSeg);
+            segStart = fs.Position;
+            segEnd = unknownSeg || segSize > fs.Length - segStart ? fs.Length : segStart + segSize;
+        }
 
         long cuesPos = -1, infoPos = -1, tracksPos = -1;
         // Walk the Segment's top-level elements up to the first Cluster.
-        for (int guard = 0; guard < 64 && fs.Position < fs.Length; guard++)
+        for (int guard = 0; guard < 64; guard++)
         {
             long elemPos = fs.Position;
-            uint id = ReadId(fs);
-            long size = ReadSize(fs, out bool unknown);
-            long dataPos = fs.Position;
-            if (id == 0) return null;
-            if (id == IdSeekHead && !unknown)
+            if (!w.Next(segEnd, out var id, out var dataPos, out var next)) break;
+            if (id == IdCluster) break;
+            if (id == IdSeekHead)
             {
-                foreach (var (seekId, pos) in ReadSeekHead(fs, dataPos + size))
+                foreach (var (seekId, pos) in ReadSeekHead(w, next))
                 {
+                    if (pos < 0 || pos > fs.Length - segStart) continue;
                     if (seekId == IdCues) cuesPos = segStart + pos;
                     else if (seekId == IdInfo) infoPos = segStart + pos;
                     else if (seekId == IdTracks) tracksPos = segStart + pos;
@@ -231,8 +285,7 @@ internal static class MatroskaCues
             else if (id == IdInfo) infoPos = elemPos;
             else if (id == IdTracks) tracksPos = elemPos;
             else if (id == IdCues) cuesPos = elemPos;
-            if (id == IdCluster || unknown) break;
-            fs.Position = dataPos + size;
+            fs.Position = next;
         }
         if (cuesPos < 0) return null;
 
@@ -240,15 +293,12 @@ internal static class MatroskaCues
         if (infoPos >= 0)
         {
             fs.Position = infoPos;
-            if (ReadId(fs) == IdInfo)
-            {
-                long size = ReadSize(fs, out _), end = fs.Position + size;
-                while (fs.Position < end)
+            if (w.Next(segEnd, out var id, out _, out var infoEnd) && id == IdInfo)
+                while (w.Next(infoEnd, out var cid, out var cdata, out var cnext))
                 {
-                    uint id = ReadId(fs); long s = ReadSize(fs, out _);
-                    if (id == IdTimestampScale) scale = ReadUInt(fs, s); else fs.Position += s;
+                    if (cid == IdTimestampScale && ReadUInt(fs, cnext - cdata) is var ts and > 0) scale = ts;
+                    fs.Position = cnext;
                 }
-            }
         }
 
         // The video track's number: TrackEntry #videoStreamIndex (ffprobe
@@ -257,22 +307,19 @@ internal static class MatroskaCues
         if (tracksPos >= 0)
         {
             fs.Position = tracksPos;
-            if (ReadId(fs) == IdTracks)
+            if (w.Next(segEnd, out var id, out _, out var tracksEnd) && id == IdTracks)
             {
-                long size = ReadSize(fs, out _), end = fs.Position + size;
                 int ordinal = 0;
-                while (fs.Position < end)
+                while (w.Next(tracksEnd, out var eid, out _, out var entryEnd))
                 {
-                    uint id = ReadId(fs); long s = ReadSize(fs, out _); long next = fs.Position + s;
-                    if (id == IdTrackEntry)
+                    if (eid == IdTrackEntry)
                     {
                         long number = -1, type = -1;
-                        while (fs.Position < next)
+                        while (w.Next(entryEnd, out var cid, out var cdata, out var cnext))
                         {
-                            uint cid = ReadId(fs); long cs = ReadSize(fs, out _);
-                            if (cid == IdTrackNumber) number = ReadUInt(fs, cs);
-                            else if (cid == IdTrackType) type = ReadUInt(fs, cs);
-                            else fs.Position += cs;
+                            if (cid == IdTrackNumber) number = ReadUInt(fs, cnext - cdata);
+                            else if (cid == IdTrackType) type = ReadUInt(fs, cnext - cdata);
+                            fs.Position = cnext;
                         }
                         if (type == 1)
                         {
@@ -281,59 +328,57 @@ internal static class MatroskaCues
                         }
                         ordinal++;
                     }
-                    fs.Position = next;
+                    fs.Position = entryEnd;
                 }
             }
         }
         if (videoTrack < 0) videoTrack = firstVideo;
 
         fs.Position = cuesPos;
-        if (ReadId(fs) != IdCues) return null;
-        long cuesSize = ReadSize(fs, out _), cuesEnd = fs.Position + cuesSize;
+        w.Clamped = false;
+        if (!w.Next(fs.Length, out var cuesId, out _, out var cuesEnd) || cuesId != IdCues) return null;
         var times = new List<double>();
-        while (fs.Position < cuesEnd)
+        while (w.Next(cuesEnd, out var id, out _, out var pointEnd))
         {
-            uint id = ReadId(fs); long s = ReadSize(fs, out _); long next = fs.Position + s;
             if (id == IdCuePoint)
             {
                 long time = -1; bool ours = false;
-                while (fs.Position < next)
+                while (w.Next(pointEnd, out var cid, out var cdata, out var cnext))
                 {
-                    uint cid = ReadId(fs); long cs = ReadSize(fs, out _); long cnext = fs.Position + cs;
-                    if (cid == IdCueTime) time = ReadUInt(fs, cs);
+                    if (cid == IdCueTime) time = ReadUInt(fs, cnext - cdata);
                     else if (cid == IdCueTrackPositions)
-                    {
-                        while (fs.Position < cnext)
+                        while (w.Next(cnext, out var pid, out var pdata, out var pnext))
                         {
-                            uint pid = ReadId(fs); long ps = ReadSize(fs, out _);
-                            if (pid == IdCueTrack) { if (videoTrack < 0 || ReadUInt(fs, ps) == videoTrack) ours = true; }
-                            else fs.Position += ps;
+                            if (pid == IdCueTrack && (videoTrack < 0 || ReadUInt(fs, pnext - pdata) == videoTrack)) ours = true;
+                            fs.Position = pnext;
                         }
-                    }
                     fs.Position = cnext;
                 }
                 if (time >= 0 && ours) times.Add(time * scale / 1e9);
             }
-            fs.Position = next;
+            fs.Position = pointEnd;
         }
+        // Cues cut short (a file truncated after its clusters, a damaged
+        // element) list only part of the key frames: a layout on them would
+        // announce one huge segment. The packet scan does it right.
+        if (w.Clamped) return null;
         return KeyframeIndexService.Normalize(times, "cues");
     }
 
-    private static IEnumerable<(uint Id, long Pos)> ReadSeekHead(FileStream fs, long end)
+    private static List<(uint Id, long Pos)> ReadSeekHead(Walk w, long end)
     {
+        var fs = w.Fs;
         var list = new List<(uint, long)>();
-        while (fs.Position < end)
+        while (w.Next(end, out var id, out _, out var next))
         {
-            uint id = ReadId(fs); long s = ReadSize(fs, out _); long next = fs.Position + s;
             if (id == IdSeek)
             {
                 uint seekId = 0; long pos = -1;
-                while (fs.Position < next)
+                while (w.Next(next, out var cid, out var cdata, out var cnext))
                 {
-                    uint cid = ReadId(fs); long cs = ReadSize(fs, out _);
-                    if (cid == IdSeekId) seekId = (uint)ReadUInt(fs, cs);
-                    else if (cid == IdSeekPosition) pos = ReadUInt(fs, cs);
-                    else fs.Position += cs;
+                    if (cid == IdSeekId) seekId = (uint)ReadUInt(fs, cnext - cdata);
+                    else if (cid == IdSeekPosition) pos = ReadUInt(fs, cnext - cdata);
+                    fs.Position = cnext;
                 }
                 if (seekId != 0 && pos >= 0) list.Add((seekId, pos));
             }
@@ -354,7 +399,7 @@ internal static class MatroskaCues
         return id;
     }
 
-    /// <summary>EBML data size (marker removed); all-ones = unknown size.</summary>
+    /// <summary>EBML data size (marker removed); all-ones, EOF or garbage = unknown.</summary>
     private static long ReadSize(FileStream fs, out bool unknown)
     {
         unknown = false;
@@ -375,11 +420,16 @@ internal static class MatroskaCues
         return value;
     }
 
+    /// <summary>Big-endian unsigned integer of up to 8 bytes; stops at EOF.</summary>
     private static long ReadUInt(FileStream fs, long size)
     {
         long v = 0;
-        for (long i = 0; i < size && i < 8; i++) v = (v << 8) | (uint)fs.ReadByte();
-        if (size > 8) fs.Position += size - 8;
+        for (long i = 0; i < size && i < 8; i++)
+        {
+            int n = fs.ReadByte();
+            if (n < 0) break;
+            v = (v << 8) | (uint)n;
+        }
         return v;
     }
 }
@@ -393,13 +443,27 @@ internal static class MatroskaCues
 /// </summary>
 internal static class Mp4SyncSamples
 {
-    public static KeyframeIndex? Read(string path, int videoStreamIndex)
+    /// <summary>Largest moov read into memory (a 3-hour film's is a few MB).</summary>
+    private const long MaxMoovBytes = 64L * 1024 * 1024;
+    /// <summary>Most samples walked (stts counts come from the file): 20M =
+    /// ~93 hours at 60 fps.</summary>
+    private const long MaxSamples = 20_000_000;
+
+    /// <summary>A table's entry count, clamped to what its box can hold.</summary>
+    private static uint Entries(byte[] buf, (int Start, int End) box, int headerBytes, int entryBytes)
+    {
+        if (box.End - box.Start < headerBytes) return 0;
+        uint n = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(box.Start + headerBytes - 4));
+        return (uint)Math.Min(n, (box.End - box.Start - headerBytes) / entryBytes);
+    }
+
+    public static KeyframeIndex? Read(string path, int videoStreamIndex, CancellationToken ct = default)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024);
         var moov = FindBox(fs, 0, fs.Length, "moov");
         if (moov is null) return null;
         var (moovStart, moovEnd) = moov.Value;
-        if (moovEnd - moovStart > 256L * 1024 * 1024) return null;
+        if (moovEnd > fs.Length || moovEnd - moovStart > MaxMoovBytes) return null;
         var buf = new byte[moovEnd - moovStart];
         fs.Position = moovStart;
         fs.ReadExactly(buf);
@@ -427,7 +491,7 @@ internal static class Mp4SyncSamples
             if (edts is not null && Child(buf, edts.Value.Start, edts.Value.End, "elst") is { } elst)
             {
                 int ev = buf[elst.Start];
-                uint count = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(elst.Start + 4));
+                uint count = Entries(buf, elst, 8, ev == 1 ? 20 : 12);
                 int p = elst.Start + 8;
                 for (uint i = 0; i < count; i++)
                 {
@@ -447,7 +511,7 @@ internal static class Mp4SyncSamples
             if (stts is null || stss is null) return null;
 
             // Sync sample numbers (1-based).
-            uint syncCount = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(stss.Value.Start + 4));
+            uint syncCount = Entries(buf, stss.Value, 8, 4);
             var sync = new HashSet<uint>();
             for (uint i = 0; i < syncCount; i++)
                 sync.Add(BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(stss.Value.Start + 8 + (int)i * 4)));
@@ -457,7 +521,7 @@ internal static class Mp4SyncSamples
             var cttsRuns = new List<(uint Count, long Offset)>();
             if (ctts is not null)
             {
-                uint n = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(ctts.Value.Start + 4));
+                uint n = Entries(buf, ctts.Value, 8, 8);
                 for (uint i = 0; i < n; i++)
                 {
                     int p = ctts.Value.Start + 8 + (int)i * 8;
@@ -468,7 +532,11 @@ internal static class Mp4SyncSamples
             }
 
             var times = new List<double>(sync.Count);
-            uint entries = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(stts.Value.Start + 4));
+            uint entries = Entries(buf, stts.Value, 8, 8);
+            long total = 0;
+            for (uint e = 0; e < entries; e++)
+                total += BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(stts.Value.Start + 8 + (int)e * 8));
+            if (total > MaxSamples) return null;   // a crafted count — not worth walking
             long dts = 0; uint sample = 1;
             int cttsRun = 0; uint cttsLeft = cttsRuns.Count > 0 ? cttsRuns[0].Count : 0;
             for (uint e = 0; e < entries; e++)
@@ -476,6 +544,7 @@ internal static class Mp4SyncSamples
                 int p = stts.Value.Start + 8 + (int)e * 8;
                 uint count = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(p));
                 uint delta = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(p + 4));
+                if ((e & 0x3FF) == 0) ct.ThrowIfCancellationRequested();
                 for (uint i = 0; i < count; i++, sample++)
                 {
                     long cto = 0;
