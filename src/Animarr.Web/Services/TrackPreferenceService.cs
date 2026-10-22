@@ -303,11 +303,20 @@ public sealed class TrackPreferenceService
     private static TrackDefaultSubtitleDto ResolveSubtitle(List<EmbeddedTrack> emb, List<ExternalTrackDto> ext,
         TrackPreference? seasonRow, TrackPreference? titleRow, UserPreferences? profile, string? audioLanguage)
     {
-        foreach (var (row, source) in new[] { (seasonRow, "memory-season"), (titleRow, "memory") })
+        var memory = new[] { (seasonRow, "memory-season"), (titleRow, "memory") };
+        foreach (var (row, source) in memory)
         {
             if (row?.SubtitleKind is not string kind) continue;
             if (kind == KindOff) return Off(source);
-            if (MatchSubtitle(emb, ext, row) is { } hit) return hit with { Source = source };
+            if (MatchSubtitle(emb, ext, row, anyType: false) is { } hit) return hit with { Source = source };
+        }
+        // Nothing of the remembered type here: the remembered language in
+        // another type still beats the profile setting — "English" chosen on
+        // E1, and E3 only has a forced-flagged English track.
+        foreach (var (row, source) in memory)
+        {
+            if (row?.SubtitleKind is not (KindEmbedded or KindExternal)) continue;
+            if (MatchSubtitle(emb, ext, row, anyType: true) is { } hit) return hit with { Source = source };
         }
 
         // A forced / signs track in the audio's language (embedded first).
@@ -394,18 +403,26 @@ public sealed class TrackPreferenceService
     /// <summary>A remembered subtitle on another file: the same kind first
     /// (external by group key, embedded by language + type + title), then the
     /// other kind with the same language and type — "Russian subtitles" is the
-    /// meaning, whether they are muxed or a sidecar on this episode.</summary>
+    /// meaning, whether they are muxed or a sidecar on this episode.
+    /// <paramref name="anyType"/>: the fallback when that found nothing — the
+    /// same language in another type (needs a remembered language). A full
+    /// choice takes a forced / signs track then; a forced / signs choice takes
+    /// the other partial type but is never promoted to a full track.</summary>
     private static TrackDefaultSubtitleDto? MatchSubtitle(List<EmbeddedTrack> emb, List<ExternalTrackDto> ext,
-        TrackPreference row)
+        TrackPreference row, bool anyType)
     {
         var type = row.SubtitleType ?? "full";
+        if (anyType && row.SubtitleLanguage is null) return null;
+        bool TypeFits(string candidate)
+            => !anyType ? candidate == type
+             : candidate != type && (type == "full" || candidate != "full");
         EmbeddedTrack? Embedded()
         {
             EmbeddedTrack? best = null;
             int bestScore = -1;
             foreach (var t in TextFirst(emb))
             {
-                if (SubType(t) != type) continue;
+                if (!TypeFits(SubType(t))) continue;
                 if (row.SubtitleLanguage is not null && t.Language != row.SubtitleLanguage) continue;
                 int title = TitleScore(row.SubtitleTitle, t.Title);
                 if (row.SubtitleLanguage is null && (row.SubtitleTitle is null || title < 2)) continue;
@@ -415,11 +432,11 @@ public sealed class TrackPreferenceService
         }
         ExternalTrackDto? ExternalByMeaning()
             => row.SubtitleLanguage is null ? null
-             : ext.FirstOrDefault(t => t.Language == row.SubtitleLanguage && (t.SubtitleType ?? "full") == type);
+             : ext.FirstOrDefault(t => t.Language == row.SubtitleLanguage && TypeFits(t.SubtitleType ?? "full"));
 
         if (row.SubtitleKind == KindExternal)
         {
-            if (MatchExternal(ext, row.SubtitleGroupKey) is { } x) return Subtitle(x, "");
+            if (!anyType && MatchExternal(ext, row.SubtitleGroupKey) is { } x) return Subtitle(x, "");
             if (ExternalByMeaning() is { } y) return Subtitle(y, "");
             return Embedded() is { } e ? Subtitle(e, "") : null;
         }
