@@ -1221,9 +1221,17 @@ public sealed partial class HlsSessionService : IDisposable
         // Audio renditions (task 6.3): every audio option — each embedded track,
         // each external dub — its own playlist and its own (lazy) ffmpeg runs;
         // the video runs carry no audio. The master then lists them as one
-        // EXT-X-MEDIA group. Only with pre-written playlists (a probed file).
+        // EXT-X-MEDIA group. Only with pre-written playlists (a probed file),
+        // and only on the COPY plans: a re-encode's video comes from hlsenc,
+        // whose fMP4 fragments on jellyfin-ffmpeg start at 0 for each run while
+        // the rendition runs keep source time — Media3 shares one timestamp
+        // base for video and audio, so the audio sat a whole resume offset
+        // ahead (position doubled, playback stalled; Sonic 2 on the projector).
+        // Re-encodes keep their audio muxed; clients switch it by restart.
         List<AudioRendition>? renditions = null;
-        if (audioRenditions && probe is not null && prewrittenPlaylists)
+        if (audioRenditions && !copyPlan)
+            _logger.LogInformation("HLS {Token}: audio renditions skipped on {Plan} (re-encodes keep their audio muxed)", token, plan);
+        if (audioRenditions && copyPlan && probe is not null && prewrittenPlaylists)
         {
             var planBaseline = reorderDelaySec + plan switch
             {
