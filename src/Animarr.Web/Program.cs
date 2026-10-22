@@ -537,6 +537,19 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+// Defence in depth: no MIME sniffing on any answer — a subtitle, font or
+// file from the library is never run as script or style because a browser
+// guessed. Set when the response starts, so every writer below gets it.
+app.Use((ctx, next) =>
+{
+    ctx.Response.OnStarting(static state =>
+    {
+        ((HttpResponse)state).Headers[Microsoft.Net.Http.Headers.HeaderNames.XContentTypeOptions] = "nosniff";
+        return Task.CompletedTask;
+    }, ctx.Response);
+    return next(ctx);
+});
+
 // Ahead of everything that writes a body (static files, the SPA fallback,
 // every endpoint) so they all go through it — see AddResponseCompression.
 app.UseResponseCompression();
