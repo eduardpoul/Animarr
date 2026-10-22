@@ -66,8 +66,9 @@ public class TrackPreference
     /// for an embedded track. Null / empty = no offsets.</summary>
     public string? AudioOffsetsJson { get; set; }
 
-    /// <summary>Player aspect / zoom preset as the client names it
-    /// ("16:9", "fill", "zoom-1.33"); null = the player's default.</summary>
+    /// <summary>Player aspect / zoom preset as the client names it; the web's
+    /// form is <c>&lt;mode&gt;[_z&lt;zoom&gt;][_p&lt;pan&gt;]</c> ("fit",
+    /// "crop:2.35:1_z1.2"). Null = the player's default.</summary>
     public string? Aspect { get; set; }
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

@@ -24,7 +24,9 @@ namespace Animarr.Shared.Models;
 /// <paramref name="Path"/> currently resolves to, else the remembered audio).
 /// 0 is stored — it overrides a dub's <c>DELAY Nms</c>.</param>
 /// <param name="Aspect">Aspect / zoom preset (≤ 32 chars of letters, digits,
-/// ':', '.', '-', '_'); "" clears (kept for older clients).</param>
+/// ':', '.', '-', '_'); "" clears (kept for older clients). Opaque to the
+/// server; the web writes <c>&lt;mode&gt;[_z&lt;zoom&gt;][_p&lt;pan&gt;]</c> — see
+/// <see cref="TrackDefaultsDto.Aspect"/>.</param>
 /// <param name="Clear">Facets to forget, applied after the values above (so
 /// clearing wins): "audio", "subtitle", "audioOffset" (of the same audio
 /// <paramref name="AudioOffsetMs"/> would target — a dub falls back to its
@@ -96,6 +98,12 @@ public sealed record TrackSubtitlePrefDto(
 /// client chose the audio explicitly or the plan takes no offset (Direct Play,
 /// Direct Stream, TS copy of the file's own audio). Always false from
 /// <c>/resolve</c>.</param>
+/// <param name="Aspect">The remembered aspect / zoom preset, as the client
+/// stored it (null = the player's default). The web writes
+/// <c>&lt;mode&gt;[_z&lt;zoom&gt;][_p&lt;pan&gt;]</c>, at most 24 chars — e.g.
+/// <c>fit</c>, <c>crop:2.35:1_z1.2</c>, <c>stretch:16:9_z1.1_p-0.2</c>. A client
+/// that supports only the mode (the TV) takes the part before the first
+/// <c>_</c> and ignores zoom / pan.</param>
 public sealed record TrackDefaultsDto(
     Guid? MediaItemId,
     int? Season,
