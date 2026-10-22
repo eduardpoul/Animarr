@@ -38,13 +38,46 @@ public static class SubtitleCache
     /// <summary><paramref name="Path"/> = the cached track; null = conversion
     /// failed (<paramref name="ExitCode"/> / <paramref name="Error"/> = ffmpeg's).
     /// <paramref name="Charset"/> = the source encoding when it had to be
-    /// converted to UTF-8 first (null = used as is / served from cache).</summary>
-    public sealed record Result(string? Path, int ExitCode, string Error, string? Charset = null);
+    /// converted to UTF-8 first (null = used as is / served from cache).
+    /// <paramref name="FailureCode"/> (failures only): <see cref="ImageSubtitle"/>
+    /// = a bitmap track, refused before any ffmpeg run; <see cref="ConvertFailed"/>
+    /// = ffmpeg could not convert it; <see cref="NotPgs"/> = a <c>.sup</c> was
+    /// asked of a track that isn't PGS.</summary>
+    public sealed record Result(string? Path, int ExitCode, string Error, string? Charset = null,
+        string? FailureCode = null);
+
+    public const string ImageSubtitle = "image_subtitle";
+    public const string ConvertFailed = "convert_failed";
+    public const string NotPgs        = "not_pgs";
+
+    /// <summary>Failed conversions per cache key (= source version + track +
+    /// format), so a bitmap or broken track isn't re-read in full on every
+    /// open. In memory only, and they expire: a failure from a file still
+    /// being written is retried later anyway (its size, so its key, changes).</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (Result Result, DateTime Until)> Failures = new();
+    private static readonly TimeSpan FailureTtl = TimeSpan.FromHours(1);
+
+    private static Result? KnownFailure(string cached)
+    {
+        if (!Failures.TryGetValue(cached, out var f)) return null;
+        if (f.Until > DateTime.UtcNow) return f.Result;
+        Failures.TryRemove(cached, out _);
+        return null;
+    }
+
+    private static Result Remember(string cached, Result failure)
+    {
+        if (Failures.Count > 4096) Failures.Clear();
+        Failures[cached] = (failure, DateTime.UtcNow + FailureTtl);
+        return failure;
+    }
 
     /// <param name="outFormat">ffmpeg muxer: <c>webvtt</c> or <c>ass</c>.</param>
     /// <param name="codecLookup">ffprobe <c>codec_name</c> of subtitle stream
-    /// <paramref name="track"/>. Only asked on the non-UTF-8 fallback for an
-    /// embedded track, to pick the muxer its raw packets are copied out with.</param>
+    /// <paramref name="track"/>: a bitmap track is refused before ffmpeg runs,
+    /// an ASS / SSA one served as the original script, and on the non-UTF-8
+    /// fallback for an embedded track it picks the muxer its raw packets are
+    /// copied out with.</param>
     public static async Task<Result> GetOrExtractAsync(string sourcePath, int track, string outFormat,
         string cacheRoot, CancellationToken ct, Func<CancellationToken, Task<string?>>? codecLookup = null)
     {
@@ -59,6 +92,22 @@ public static class SubtitleCache
             TouchForLru(cached);
             return new Result(cached, 0, "");
         }
+        if (KnownFailure(cached) is { } failed) return failed;
+
+        // One probe lookup per request, however many steps below ask.
+        if (codecLookup is not null)
+        {
+            var lookup = codecLookup;
+            Task<string?>? memo = null;
+            codecLookup = c => memo ??= lookup(c);
+        }
+
+        // A bitmap track (PGS, VobSub, DVB) can't become text: ffmpeg would
+        // read the whole container only to fail at the muxer.
+        if (!SubtitleCharset.IsTextSubtitleFile(sourcePath) && codecLookup is not null
+            && await codecLookup(ct) is { } sourceCodec && SubtitleCodecs.IsImage(sourceCodec))
+            return Remember(cached, new Result(null, -1,
+                $"Bitmap subtitle ({sourceCodec}) can't be converted to text.", FailureCode: ImageSubtitle));
 
         // An ASS / SSA source asked for as ASS is served as the original
         // script (styles, typesetting, [Fonts] intact) instead of a round trip
@@ -121,7 +170,7 @@ public static class SubtitleCache
                 }
             }
 
-            if (r.Path is null) return r;
+            if (r.Path is null) return Remember(cached, r with { FailureCode = ConvertFailed });
             File.Move(tmp, cached, overwrite: true);
 
             if (Interlocked.Increment(ref _writesSinceSweep) >= SweepEveryWrites)
@@ -137,6 +186,50 @@ public static class SubtitleCache
         }
     }
 
+    /// <summary>
+    /// A PGS track as a raw <c>.sup</c> stream (what libbitsub reads):
+    /// <c>-c:s copy -f sup</c>, cached like the text conversions. A standalone
+    /// <c>.sup</c> file is served as itself. Anything that isn't PGS is refused
+    /// up front (<see cref="NotPgs"/>) — VobSub has no ffmpeg muxer that a web
+    /// renderer reads.
+    /// </summary>
+    public static async Task<Result> GetOrExtractSupAsync(string sourcePath, int track, string cacheRoot,
+        Func<CancellationToken, Task<string?>> codecLookup, CancellationToken ct)
+    {
+        if (string.Equals(Path.GetExtension(sourcePath), ".sup", StringComparison.OrdinalIgnoreCase))
+            return track == 0 ? new Result(sourcePath, 0, "") : new Result(null, -1, "A .sup file has one track.", FailureCode: NotPgs);
+
+        var dir = Path.Combine(cacheRoot, "subtitles");
+        Directory.CreateDirectory(dir);
+        var fi     = new FileInfo(sourcePath);
+        var cached = CachedPath(dir, sourcePath, track, "sup", fi);
+        if (File.Exists(cached))
+        {
+            TouchForLru(cached);
+            return new Result(cached, 0, "");
+        }
+        if (KnownFailure(cached) is { } failed) return failed;
+
+        var codec = await codecLookup(ct);
+        if (!SubtitleCodecs.IsPgs(codec))
+            return Remember(cached, new Result(null, -1,
+                codec is null ? "No such subtitle track." : $"Subtitle track {track} is {codec}, not PGS.", FailureCode: NotPgs));
+
+        var tmp = $"{cached}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            var r = await RunAsync(
+            [
+                "-hide_banner", "-loglevel", "warning",
+                "-i", sourcePath, "-map", $"0:s:{track}", "-c:s", "copy", "-f", "sup", "-y", tmp,
+            ], tmp, ct);
+            if (r.Path is null) return Remember(cached, r with { FailureCode = ConvertFailed });
+            File.Move(tmp, cached, overwrite: true);
+            return r with { Path = cached };
+        }
+        finally { TryDelete(tmp); }
+    }
+
     /// <summary>Where track <paramref name="track"/> of <paramref name="sourcePath"/>
     /// in <paramref name="outFormat"/> is cached, keyed by the file version.</summary>
     private static string CachedPath(string dir, string sourcePath, int track, string outFormat, FileInfo fi)
@@ -149,7 +242,8 @@ public static class SubtitleCache
                    + (outFormat == "ass" ? "|orig1" : "");
         var hash = Convert.ToHexString(
             System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(key)));
-        return Path.Combine(dir, $"{hash}.{(outFormat == "ass" ? "ass" : "vtt")}");
+        var ext = outFormat switch { "ass" => "ass", "sup" => "sup", _ => "vtt" };
+        return Path.Combine(dir, $"{hash}.{ext}");
     }
 
     /// <summary>The cached conversion of a track, or null when it was never

@@ -32,6 +32,8 @@ public sealed record SubtitleTracksDto(IReadOnlyList<SubtitleTrackInfoDto> Track
 /// <param name="AssUrl">Text tracks: ASS URL — the ORIGINAL script for an ASS /
 /// SSA source (styles, typesetting intact), a default-styled conversion
 /// otherwise.</param>
+/// <param name="SupUrl">PGS tracks: the raw <c>.sup</c> stream for a bitmap
+/// renderer (libbitsub) — <c>/api/subtitle/sup?path=…&amp;track=N</c>.</param>
 public sealed record SubtitleTrackInfoDto(
     int Index,
     string? Codec,
@@ -42,7 +44,8 @@ public sealed record SubtitleTrackInfoDto(
     bool IsForced,
     AssInfoDto? Ass,
     string? VttUrl,
-    string? AssUrl);
+    string? AssUrl,
+    string? SupUrl = null);
 
 /// <param name="Complex">True when a plain WebVTT rendering loses what
 /// matters — use a libass renderer (JASSUB) for it.</param>

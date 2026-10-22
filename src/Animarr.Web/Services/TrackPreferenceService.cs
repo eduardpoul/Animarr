@@ -202,7 +202,8 @@ public sealed class TrackPreferenceService
         }
 
         var extAudio = external.Where(t => t.Kind == "audio").ToList();
-        var extSubs  = external.Where(t => t.Kind == "subtitle").ToList();
+        // Text sidecars before bitmap ones (.sup / .idx), like the embedded picks.
+        var extSubs  = external.Where(t => t.Kind == "subtitle").OrderBy(t => t.Image == true ? 1 : 0).ToList();
         var audio    = ResolveAudio(embedded.Audio, extAudio, seasonRow, titleRow, profile);
         var subtitle = ResolveSubtitle(embedded.Subtitles, extSubs, seasonRow, titleRow, profile);
 
@@ -393,15 +394,10 @@ public sealed class TrackPreferenceService
         return type == "full" && t.IsForced ? "forced" : type;
     }
 
-    private static readonly HashSet<string> ImageSubtitleCodecs = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "hdmv_pgs_subtitle", "pgssub", "dvd_subtitle", "dvdsub", "dvb_subtitle", "dvbsub", "xsub", "dvb_teletext",
-    };
-
     /// <summary>Text tracks before bitmap ones (a browser can't render PGS /
     /// VobSub yet), each group in stream order.</summary>
     private static IEnumerable<EmbeddedTrack> TextFirst(List<EmbeddedTrack> subs)
-        => subs.OrderBy(t => t.Codec is not null && ImageSubtitleCodecs.Contains(t.Codec) ? 1 : 0).ThenBy(t => t.Index);
+        => subs.OrderBy(t => SubtitleCodecs.IsImage(t.Codec) ? 1 : 0).ThenBy(t => t.Index);
 
     // ─── Languages ────────────────────────────────────────────────────────────
 

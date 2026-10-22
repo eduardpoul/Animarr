@@ -51,4 +51,11 @@ public sealed record ExternalTrackDto(
     string? Folder = null,
     /// <summary>Subtitles only: "full", "forced" or "signs" (signs / songs /
     /// надписи in the name or folders). Null for audio.</summary>
-    string? SubtitleType = null);
+    string? SubtitleType = null,
+    /// <summary>Subtitles only: true for a bitmap track (<c>.sup</c> PGS,
+    /// <c>.idx</c>+<c>.sub</c> VobSub) — needs a bitmap renderer, not
+    /// <c>/api/subtitle</c>. Null for audio.</summary>
+    bool? Image = null,
+    /// <summary>VobSub: the <c>.sub</c> data file that belongs to this
+    /// <c>.idx</c> (both fetched with <c>/api/file</c>); null otherwise.</summary>
+    string? CompanionPath = null);

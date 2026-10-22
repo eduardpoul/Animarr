@@ -66,6 +66,51 @@ internal static class SubtitleAssetEndpoints
         .WithName("GetSubtitleFont")
         .RequireAuthorization(MediaAuth.Policies.Media);
 
+        // ─── /api/subtitle/sup — a PGS track as raw .sup (for libbitsub) ──────
+        // Embedded PGS: copied out once per file version (a full read of the
+        // container) into the subtitle cache. A standalone .sup is served as is.
+        // Anything else is a fast 422 with code "not_pgs" — no ffmpeg run.
+        app.MapGet("/api/subtitle/sup", async (
+            string path,
+            int? track,
+            MediaPathValidator pathValidator,
+            SubtitleTrackInfoService tracks,
+            MediaCachePaths cachePaths,
+            HttpContext http,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            var (ok, fullPath, earlyResult) = await pathValidator.ResolveLibraryFileAsync(path, ct);
+            if (!ok) return earlyResult!;
+            var index = track ?? 0;
+            if (index < 0) return Results.BadRequest();
+            try
+            {
+                var r = await SubtitleCache.GetOrExtractSupAsync(fullPath!, index, cachePaths.CacheRoot,
+                    c => tracks.CodecOfAsync(fullPath!, index, c), ct);
+                if (r.Path is null)
+                {
+                    http.Response.Headers.CacheControl = "no-store";
+                    return Results.Problem(detail: r.Error, statusCode: StatusCodes.Status422UnprocessableEntity,
+                        title: "Subtitle track not available as .sup",
+                        extensions: new Dictionary<string, object?> { ["code"] = r.FailureCode ?? SubtitleCache.ConvertFailed });
+                }
+                http.Response.Headers.CacheControl = "private, max-age=3600";
+                return Results.File(r.Path, "application/octet-stream", enableRangeProcessing: true);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return Results.Empty;
+            }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger("ApiSubtitleSup").LogError(ex, ".sup extract failed for {Path} track {Track}", fullPath, index);
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+        })
+        .WithName("GetSubtitleSup")
+        .RequireAuthorization(MediaAuth.Policies.Media);
+
         return app;
     }
 }

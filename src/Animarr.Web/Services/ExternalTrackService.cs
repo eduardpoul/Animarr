@@ -166,7 +166,7 @@ public sealed partial class ExternalTrackService
         var patterns = await BuildEffectivePatternsAsync(db, folder?.Id, isMovie, ct);
 
         ExternalTrackListingCache.Listing listing;
-        try { listing = _listings.Get(searchRoot, recursive, _patterns.DetermineFileKind); }
+        try { listing = _listings.Get(searchRoot, recursive, KindOf); }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "External-track sweep could not enumerate {Root}", searchRoot);
@@ -189,12 +189,20 @@ public sealed partial class ExternalTrackService
         bool movieOwnsTree = isMovie && recursive
             && listing.Files.Count(f => f.Kind == FileKind.Video) == 1;
 
+        // VobSub sidecars come as .idx + .sub: the pair is ONE track, listed
+        // as its .idx (with the .sub as companion). A .sub without an .idx is
+        // a text format (MicroDVD) and stays a track of its own.
+        var allPaths = listing.Files.Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         // ── Sweep candidate audio / subtitle files ────────────────────────────
         var matches = new List<Match>();
         foreach (var file in listing.Files)
         {
             ct.ThrowIfCancellationRequested();
             if (file.Kind is not (FileKind.Audio or FileKind.Subtitle)) continue;
+            if (file.Path.EndsWith(".sub", StringComparison.OrdinalIgnoreCase)
+                && allPaths.Contains(Path.ChangeExtension(file.Path, ".idx")))
+                continue;
 
             var path     = file.Path;
             var candDir  = Path.GetDirectoryName(path) ?? searchRoot;
@@ -251,24 +259,30 @@ public sealed partial class ExternalTrackService
             var remainder     = m.StemMatch ? null : ExternalTrackNaming.StemRemainder(candStem, videoStem);
             var lang = ExternalTrackNaming.ExtractLanguage(m.Suffix, m.RelativeSegments.Reverse(), remainder)
                        ?? ExternalTrackNaming.FromLanguageTag(p?.Language);
+            var ext   = Path.GetExtension(m.Path).TrimStart('.').ToLowerInvariant();
+            var codec = p?.Codec ?? ext switch { "sup" => "hdmv_pgs_subtitle", "idx" => "dvd_subtitle", _ => null };
+            var companion = ext == "idx" && allPaths.Contains(Path.ChangeExtension(m.Path, ".sub"))
+                ? Path.ChangeExtension(m.Path, ".sub") : null;
 
             results.Add(new ExternalTrackDto(
                 Path:      m.Path,
                 FileName:  Path.GetFileName(m.Path),
-                Ext:       Path.GetExtension(m.Path).TrimStart('.').ToLowerInvariant(),
+                Ext:       ext,
                 Kind:      isAudio ? "audio" : "subtitle",
                 Label:     ExternalTrackNaming.BuildLabel(isAudio, groupSegments, m.Suffix, remainder, lang,
                                m.NamedByFile ? remainder : null),
                 Language:  lang?.Code,
                 MatchTier: m.Tier,
-                Codec:        p?.Codec,
+                Codec:        codec,
                 Channels:     p?.Channels,
                 DurationSec:  p?.DurationSec,
                 DelayMs:      ExternalTrackNaming.ParseDelayMs(candStem),
                 GroupKey:     ExternalTrackNaming.GroupKey(m.SameDir, m.StemMatch, groupSegments, m.Suffix, candStem),
                 Folder:       m.Folder,
                 SubtitleType: isAudio ? null
-                    : ExternalTrackNaming.SubtitleTypeOf(m.Suffix, string.Join(' ', m.RelativeSegments), remainder)));
+                    : ExternalTrackNaming.SubtitleTypeOf(m.Suffix, string.Join(' ', m.RelativeSegments), remainder),
+                Image:         isAudio ? null : SubtitleCodecs.IsImage(codec),
+                CompanionPath: companion));
             hints.Add(m.StemMatch ? m.Suffix ?? "" : remainder ?? "");
         }
         Disambiguate(results, hints);
@@ -312,6 +326,14 @@ public sealed partial class ExternalTrackService
                     results[i] = results[i] with { Label = $"{results[i].Label} · {hint}" };
             }
     }
+
+    /// <summary>The configured extension kinds, plus the bitmap subtitle
+    /// sidecars the library scanner has no use for: <c>.sup</c> (PGS) and
+    /// <c>.idx</c> (VobSub index; its <c>.sub</c> is the companion).</summary>
+    private FileKind KindOf(string extension)
+        => extension.Equals(".sup", StringComparison.OrdinalIgnoreCase) || extension.Equals(".idx", StringComparison.OrdinalIgnoreCase)
+            ? FileKind.Subtitle
+            : _patterns.DetermineFileKind(extension);
 
     // ─── ffprobe facts of the matched files ───────────────────────────────────
 

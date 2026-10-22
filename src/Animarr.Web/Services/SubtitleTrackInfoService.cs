@@ -110,7 +110,8 @@ public sealed class SubtitleTrackInfoService
                 IsForced:  s.IsForced,
                 Ass:       ass,
                 VttUrl:    image ? null : $"/api/subtitle?path={escaped}&track={track}",
-                AssUrl:    image ? null : $"/api/subtitle?path={escaped}&track={track}&format=ass"));
+                AssUrl:    image ? null : $"/api/subtitle?path={escaped}&track={track}&format=ass",
+                SupUrl:    SubtitleCodecs.IsPgs(s.Codec) ? $"/api/subtitle/sup?path={escaped}&track={track}" : null));
         }
 
         IReadOnlyList<SubtitleFontDto> fonts = [];
@@ -118,6 +119,11 @@ public sealed class SubtitleTrackInfoService
             fonts = (await _fonts.ListAsync(fullPath, ct)).Select(f => ToDto(f, escaped)).ToList();
         return new SubtitleTracksDto(tracks, fonts);
     }
+
+    /// <summary>ffprobe codec_name of subtitle stream s:<paramref name="track"/>;
+    /// null when there is no such stream.</summary>
+    public async Task<string?> CodecOfAsync(string fullPath, int track, CancellationToken ct)
+        => SubtitleStreams(await _probeCache.GetStreamsJsonAsync(fullPath, ct)).FirstOrDefault(s => s.Index == track)?.Codec;
 
     public async Task<IReadOnlyList<SubtitleFontDto>> FontsAsync(string fullPath, CancellationToken ct)
     {
