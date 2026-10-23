@@ -75,7 +75,8 @@ public sealed class HttpAnimarrApiClient : IAnimarrApiClient
     public async Task<MediaItemDto> ResolveMediaCandidateAsync(Guid id, ResolveCandidateRequest request, CancellationToken ct = default)
     {
         using var resp = await _http.PostAsJsonAsync(ApiRoutes.MediaItemResolve(id), request, JsonOpts, ct);
-        resp.EnsureSuccessStatusCode();
+        // 422 carries a code (id_format, not_found…) the edit drawer localizes.
+        await ApiProblemException.ThrowIfFailedAsync(resp, ct);
         return (await resp.Content.ReadFromJsonAsync<MediaItemDto>(JsonOpts, ct))!;
     }
 

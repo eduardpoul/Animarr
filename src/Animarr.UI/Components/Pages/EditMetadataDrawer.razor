@@ -485,8 +485,28 @@
             await OnSaved.InvokeAsync();
             Toasts.ShowSuccess(L["edit_metadata.toast_reidentified_source"]);
         }
+        catch (ApiProblemException ex)
+        {
+            Toasts.ShowError(L.Get("edit_metadata.toast_apply_failed_fmt", ApplyErrorText(ex, source, externalId.Trim())));
+        }
         catch (Exception ex) { Toasts.ShowError(L.Get("edit_metadata.toast_apply_failed_fmt", ex.Message)); }
     }
+
+    /// <summary>The server's 422 code → why, in the UI's language (the title
+    /// is left as it was).</summary>
+    private string ApplyErrorText(ApiProblemException ex, string source, string id) => ex.Code switch
+    {
+        "id_format"      => L.Get("edit_metadata.err_id_format", id),
+        "imdb_id_format" => L.Get("edit_metadata.err_imdb_format", id),
+        "tmdb_no_key"    => L["edit_metadata.err_tmdb_no_key"],
+        "not_found"      => L.Get(source switch
+        {
+            "mal"                     => "edit_metadata.err_not_found_mal",
+            "imdb_tv" or "imdb_movie" => "edit_metadata.err_not_found_imdb",
+            _                         => "edit_metadata.err_not_found_tmdb",
+        }, id),
+        _                => ex.Detail ?? ex.Message,
+    };
 
     private Task ApplyTmdbAsync() => ApplySourceAsync(_tmdbIsTv ? "tmdb_tv" : "tmdb_movie", _tmdbIdInput ?? "");
     private Task ApplyMalAsync()  => ApplySourceAsync("mal", _malIdInput ?? "");
