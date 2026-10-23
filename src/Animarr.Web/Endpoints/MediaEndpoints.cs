@@ -888,8 +888,28 @@ internal static class MediaEndpoints
             var dtos = cached
                 .OrderBy(e => e.Season).ThenBy(e => e.Episode)
                 .Select(e => new EpisodeMetaDto(e.Season, e.Episode, e.Title, e.Overview, e.AirDate, e.Rating, e.RuntimeMin))
-                .ToArray();
-            return Results.Ok(dtos);
+                .ToList();
+
+            // A run TMDB keeps as one season but the disk splits (SeasonOffsetsJson
+            // {"2":12}): files reach their rows through AbsoluteEpisode, but an
+            // episode not on disk yet has no file — disk S2E3 showed "Episode 3".
+            // Also list those rows under the disk's numbering (S2E3 = TMDB S1E15).
+            var offsets = MediaFileResolver.ParseSeasonOffsets(item.SeasonOffsetsJson);
+            if (offsets.Count > 0)
+            {
+                var have = dtos.Select(d => (d.Season, d.Episode)).ToHashSet();
+                var s1 = dtos.Where(d => d.Season == 1).ToDictionary(d => d.Episode);
+                var bounds = offsets.OrderBy(kv => kv.Key).ToList();
+                for (int i = 0; i < bounds.Count; i++)
+                {
+                    var (season, offset) = (bounds[i].Key, bounds[i].Value);
+                    int end = i + 1 < bounds.Count ? bounds[i + 1].Value : int.MaxValue;
+                    foreach (var (abs, row) in s1.Where(kv => kv.Key > offset && kv.Key <= end))
+                        if (have.Add((season, abs - offset)))
+                            dtos.Add(row with { Season = season, Episode = abs - offset });
+                }
+            }
+            return Results.Ok(dtos.OrderBy(e => e.Season).ThenBy(e => e.Episode).ToArray());
         });
 
         // ── Skip intro / credits segments ────────────────────────────────────

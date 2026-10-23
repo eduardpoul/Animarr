@@ -444,7 +444,7 @@ public sealed partial class MediaFileResolver
     /// <summary>Parse MediaItem.SeasonOffsetsJson (a JSON object {"3":106,…})
     /// into a diskSeason→offset map. Returns an empty map on null/malformed
     /// input. Keys are season numbers as strings; values are absolute offsets.</summary>
-    private static Dictionary<int, int> ParseSeasonOffsets(string? json)
+    internal static Dictionary<int, int> ParseSeasonOffsets(string? json)
     {
         var map = new Dictionary<int, int>();
         if (string.IsNullOrWhiteSpace(json)) return map;
