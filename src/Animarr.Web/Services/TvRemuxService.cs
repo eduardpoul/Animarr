@@ -22,8 +22,10 @@ namespace Animarr.Web.Services;
 ///
 /// Off unless the admin enables <see cref="AppConfigKeys.TvRemuxEnabled"/>.
 /// Runs for a title when an admin starts it, and by itself for a finished
-/// torrent's files (<see cref="TorrentEngineService"/> ends that torrent's
-/// seeding first — the rewritten data no longer matches its pieces). One job
+/// torrent's files. Either way the torrents holding the files stop seeding for
+/// good first (<see cref="TorrentEngineService"/>) — the rewritten data no
+/// longer matches their pieces — and a file a torrent is still downloading
+/// waits ("downloading"). One job
 /// at a time, parked while anyone is watching (<see cref="PlaybackActivity"/>),
 /// skipped when the volume can't hold the file twice for the switch
 /// (+<see cref="FreeSpaceMarginBytes"/>).
@@ -41,6 +43,7 @@ public sealed class TvRemuxService : BackgroundService
     public const string StatusDone      = "done";
     public const string StatusFailed    = "failed";
     public const string StatusSkipped   = "skipped";
+    public const string StatusDownloading = "downloading";
 
     private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
         { ".mkv", ".m2ts", ".mts", ".wmv", ".asf" };
@@ -49,6 +52,7 @@ public sealed class TvRemuxService : BackgroundService
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly MediaProbeCache _probeCache;
     private readonly PlaybackActivity _activity;
+    private readonly TorrentEngineService _torrents;
     private readonly ILogger<TvRemuxService> _logger;
     private readonly Channel<string> _queue = Channel.CreateUnbounded<string>();
     /// <summary>Job state by path — the source's while queued / running, the
@@ -56,12 +60,14 @@ public sealed class TvRemuxService : BackgroundService
     private readonly ConcurrentDictionary<string, JobState> _jobs = new(StringComparer.OrdinalIgnoreCase);
 
     public TvRemuxService(IServiceScopeFactory scopes, IDbContextFactory<AppDbContext> dbFactory,
-        MediaProbeCache probeCache, PlaybackActivity activity, ILogger<TvRemuxService> logger)
+        MediaProbeCache probeCache, PlaybackActivity activity, TorrentEngineService torrents,
+        ILogger<TvRemuxService> logger)
     {
         _scopes     = scopes;
         _dbFactory  = dbFactory;
         _probeCache = probeCache;
         _activity   = activity;
+        _torrents   = torrents;
         _logger     = logger;
     }
 
@@ -75,8 +81,13 @@ public sealed class TvRemuxService : BackgroundService
     /// <param name="Reasons">Why a TV needs the remux: "container_m2ts",
     /// "container_wmv", "no_cues", "compressed_tracks"; empty = it doesn't.</param>
     /// <param name="Status">"not_needed", "needed", "queued", "running", "done"
-    /// (rewritten this session), "failed", "skipped" (see <paramref name="Error"/>).</param>
+    /// (rewritten this session), "failed", "skipped" (see <paramref name="Error"/>),
+    /// "downloading" (a torrent hasn't finished it).</param>
     public sealed record FileStatus(string Path, IReadOnlyList<string> Reasons, string Status, string? Error);
+
+    /// <summary>A title's videos, and the torrents whose seeding a run would
+    /// end (their names; the files' rewrite breaks their pieces).</summary>
+    public sealed record TitleState(IReadOnlyList<FileStatus> Files, IReadOnlyList<string> EndsSeeding);
 
     public async Task<bool> IsEnabledAsync(CancellationToken ct)
     {
@@ -89,35 +100,50 @@ public sealed class TvRemuxService : BackgroundService
 
     /// <summary>Every video of the title with its reasons and state; null for
     /// an unknown title.</summary>
-    public async Task<IReadOnlyList<FileStatus>?> StatusAsync(Guid mediaItemId, CancellationToken ct)
+    public async Task<TitleState?> StatusAsync(Guid mediaItemId, CancellationToken ct)
     {
         var files = await FilesAsync(mediaItemId, ct);
         if (files is null) return null;
+        var holders = await _torrents.TvRemuxHoldersAsync(files);
         var result = new List<FileStatus>(files.Count);
         foreach (var path in files)
-            result.Add(await DescribeAsync(path, ct));
-        return result;
+            result.Add(Held(await DescribeAsync(path, ct), holders));
+        var ends = result.Where(Queueable)
+            .Select(f => holders.Seeding.TryGetValue(f.Path, out var t) ? t.Name : null)
+            .OfType<string>().Distinct().ToList();
+        return new TitleState(result, ends);
     }
 
-    /// <summary>Queue every file of the title that needs the remux; the updated
-    /// states. Null for an unknown title.</summary>
-    public async Task<IReadOnlyList<FileStatus>?> QueueAsync(Guid mediaItemId, CancellationToken ct)
+    /// <summary>Queue every file of the title that needs the remux, ending the
+    /// seeding of the torrents that hold them first; the updated states. Null
+    /// for an unknown title.</summary>
+    public async Task<TitleState?> QueueAsync(Guid mediaItemId, CancellationToken ct)
     {
         var files = await FilesAsync(mediaItemId, ct);
         if (files is null) return null;
-        var result = new List<FileStatus>(files.Count);
+        var holders = await _torrents.TvRemuxHoldersAsync(files);
+        var states = new List<FileStatus>(files.Count);
         foreach (var path in files)
+            states.Add(Held(await DescribeAsync(path, ct), holders));
+        var queue = states.Where(Queueable).ToList();
+        await _torrents.EndSeedingForTvRemuxAsync(queue
+            .Select(f => holders.Seeding.TryGetValue(f.Path, out var t) ? t.InfoHash : null)
+            .OfType<string>().Distinct().ToList());
+        var result = new List<FileStatus>(states.Count);
+        foreach (var s in states)
         {
-            var s = await DescribeAsync(path, ct);
-            if (s.Status is StatusNeeded or StatusFailed or StatusSkipped)
-            {
-                await EnqueueAsync(path, ct);
-                s = s with { Status = StatusQueued, Error = null };
-            }
-            result.Add(s);
+            if (!queue.Contains(s)) { result.Add(s); continue; }
+            await EnqueueAsync(s.Path, ct);
+            result.Add(s with { Status = StatusQueued, Error = null });
         }
-        return result;
+        return new TitleState(result, Array.Empty<string>());
     }
+
+    private static bool Queueable(FileStatus f) => f.Status is StatusNeeded or StatusFailed or StatusSkipped;
+
+    /// <summary>A file still being downloaded can't be rewritten yet.</summary>
+    private static FileStatus Held(FileStatus f, TorrentEngineService.TvRemuxHolders holders) =>
+        Queueable(f) && holders.Downloading.Contains(f.Path) ? f with { Status = StatusDownloading, Error = null } : f;
 
     /// <summary>Of <paramref name="paths"/>, the videos a TV needs remuxed — what
     /// a finished torrent would hand over.</summary>
@@ -148,7 +174,9 @@ public sealed class TvRemuxService : BackgroundService
     private async Task<FileStatus> DescribeAsync(string path, CancellationToken ct)
     {
         var reasons = await ReasonsAsync(path, ct);
-        if (_jobs.TryGetValue(path, out var job))
+        // "done" only while it holds: a file replaced since (a new download at
+        // the same path) needs the remux again.
+        if (_jobs.TryGetValue(path, out var job) && !(job.Status == StatusDone && reasons.Count > 0))
             return new FileStatus(path, reasons, job.Status, job.Error);
         return new FileStatus(path, reasons, reasons.Count > 0 ? StatusNeeded : StatusNotNeeded, null);
     }
@@ -223,6 +251,16 @@ public sealed class TvRemuxService : BackgroundService
             return;
         }
         if ((await ReasonsAsync(source, ct)).Count == 0) { state.Status = StatusDone; return; }
+        // Whatever queued it, no torrent may hold the file as it's rewritten:
+        // one still downloading it waits, one seeding it stops for good.
+        var holders = await _torrents.TvRemuxHoldersAsync([source]);
+        if (holders.Downloading.Contains(source))
+        {
+            (state.Status, state.Error) = (StatusSkipped, "a torrent is still downloading it");
+            return;
+        }
+        if (holders.Seeding.TryGetValue(source, out var seeder))
+            await _torrents.EndSeedingForTvRemuxAsync([seeder.InfoHash]);
 
         bool matroskaSource = Path.GetExtension(source).Equals(".mkv", StringComparison.OrdinalIgnoreCase);
         var final = matroskaSource ? source : Path.ChangeExtension(source, ".mkv");

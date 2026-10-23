@@ -433,6 +433,102 @@ public class TorrentEngineService : BackgroundService
         return await ctx.TorrentRecords.AnyAsync(r => r.InfoHash == infoHash && r.TvRemuxedAt != null);
     }
 
+    /// <summary>Which torrents hold these files (absolute paths), for an
+    /// "Optimize for TV" rewrite: <paramref name="Seeding"/> — file → the
+    /// finished torrent whose seeding the rewrite must end (not handed over
+    /// yet); <paramref name="Downloading"/> — files a torrent hasn't finished,
+    /// which can't be rewritten yet.</summary>
+    public sealed record TvRemuxHolders(
+        IReadOnlyDictionary<string, (string InfoHash, string Name)> Seeding,
+        IReadOnlySet<string> Downloading);
+
+    public async Task<TvRemuxHolders> TvRemuxHoldersAsync(IEnumerable<string> paths)
+    {
+        var wanted      = new HashSet<string>(paths, StringComparer.OrdinalIgnoreCase);
+        var seeding     = new Dictionary<string, (string InfoHash, string Name)>(StringComparer.OrdinalIgnoreCase);
+        var downloading = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var held = new List<(string Hash, TorrentManager Mgr, ITorrentManagerFile File, string Path)>();
+        foreach (var (hash, mgr) in _managers)
+        {
+            if (mgr.Torrent is null) continue;     // a magnet without its metadata knows no files
+            foreach (var f in mgr.Files)
+            {
+                if (f.Priority == Priority.DoNotDownload) continue;
+                var path = wanted.Contains(f.FullPath) ? f.FullPath
+                         : wanted.Contains(f.DownloadIncompleteFullPath) ? f.DownloadIncompleteFullPath
+                         : null;
+                if (path is not null) held.Add((hash, mgr, f, path));
+            }
+        }
+        if (held.Count == 0) return new TvRemuxHolders(seeding, downloading);
+
+        var hashes = held.Select(h => h.Hash).Distinct().ToList();
+        Dictionary<string, (DateTime? CompletedAt, DateTime? TvRemuxedAt)> records;
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var ctx = await db.CreateDbContextAsync();
+            records = (await ctx.TorrentRecords
+                    .Where(r => hashes.Contains(r.InfoHash))
+                    .Select(r => new { r.InfoHash, r.CompletedAt, r.TvRemuxedAt })
+                    .ToListAsync())
+                .ToDictionary(r => r.InfoHash, r => (r.CompletedAt, r.TvRemuxedAt), StringComparer.OrdinalIgnoreCase);
+        }
+
+        foreach (var (hash, mgr, f, path) in held)
+        {
+            records.TryGetValue(hash, out var rec);
+            if (rec.TvRemuxedAt is not null) continue;     // handed over: never touches its files again
+            // A torrent not started this run (stopped by the user, restored
+            // idle) may not have read its pieces back: its record says whether
+            // it finished. A running one knows each file's pieces.
+            bool done = mgr.State == TorrentState.Stopped
+                ? rec.CompletedAt is not null
+                : f.BitField.Length > 0 && f.BitField.TrueCount == f.BitField.Length;
+            if (done) seeding[path] = (hash, _names.GetValueOrDefault(hash) ?? mgr.Torrent!.Name);
+            else downloading.Add(path);
+        }
+        return new TvRemuxHolders(seeding, downloading);
+    }
+
+    /// <summary>An "Optimize for TV" run an admin started is about to rewrite
+    /// these torrents' files: end their seeding for good first, as a finished
+    /// download's hand-over does (<see cref="HandOverForTvRemuxAsync"/>).</summary>
+    public async Task EndSeedingForTvRemuxAsync(IReadOnlyCollection<string> infoHashes)
+    {
+        if (infoHashes.Count == 0) return;
+        var hashes = infoHashes.ToList();
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var ctx = await db.CreateDbContextAsync();
+            var records = await ctx.TorrentRecords
+                .Where(r => hashes.Contains(r.InfoHash) && r.TvRemuxedAt == null)
+                .ToListAsync();
+            foreach (var r in records)
+            {
+                r.TvRemuxedAt = DateTime.UtcNow;
+                r.State       = TorrentRecordState.Stopped;
+            }
+            await ctx.SaveChangesAsync();
+        }
+        foreach (var hash in hashes)
+        {
+            _persisted.TryRemove(hash, out _);
+            if (!_managers.TryGetValue(hash, out var mgr)) continue;
+            if (mgr.State is not (TorrentState.Stopped or TorrentState.Stopping))
+            {
+                try { await mgr.StopAsync(); }
+                catch (Exception ex) { _logger.LogWarning(ex, "[TV remux] couldn't stop {Hash}", hash); }
+            }
+            _logger.LogInformation("[TV remux] torrent {Name} — seeding ended, its files are being remuxed in place",
+                _names.GetValueOrDefault(hash) ?? hash);
+        }
+        UpdateLiveStats();
+        StateChanged?.Invoke();
+    }
+
     private async Task OnStateChangedAsync(TorrentManager mgr, string infoHash)
     {
         // M-12: use cached config (refreshed by UpdateGlobalSettingsAsync) instead of a DB query per state change.

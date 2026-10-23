@@ -4,8 +4,10 @@
     title's videos a TV's player handles badly (M2TS / WMV containers,
     Matroska without a Cues index or with compressed tracks) and the state of
     each one's remux — in place, no copies; "Run" queues it (POST → 202, 409
-    code "disabled" while playback.tv_remux_enabled is off). Polls while
-    anything is queued or running. The host page draws the card and its heading.
+    code "disabled" while playback.tv_remux_enabled is off). A run ends the
+    seeding of the torrents holding those files (endsSeeding, named before the
+    click); a file a torrent is still downloading waits. Polls while anything
+    is queued or running. The host page draws the card and its heading.
 *@
 @implements IDisposable
 @inject HttpClient Http
@@ -23,7 +25,9 @@
         var listed   = files.Where(f => f.Status != "not_needed").ToList();
         var needed   = files.Count(f => f.Status is "needed" or "failed" or "skipped");
         var working  = files.Count(f => f.Status is "queued" or "running");
+        var waiting  = files.Count(f => f.Status == "downloading");
         var done     = files.Where(f => f.Status == "done").ToList();
+        var ends     = _status.EndsSeeding ?? Array.Empty<string>();
 
         @if (listed.Count == 0)
         {
@@ -34,6 +38,7 @@
             <p class="tvr__line">
                 @if (needed > 0)  { <span>@L.Get("tv_remux.summary_needed", needed, files.Length)</span> }
                 @if (working > 0) { <span>@L.Get("tv_remux.summary_working", working)</span> }
+                @if (waiting > 0) { <span>@L.Get("tv_remux.summary_downloading", waiting)</span> }
                 @if (done.Count > 0) { <span>@L.Get("tv_remux.summary_done", done.Count)</span> }
             </p>
         }
@@ -82,6 +87,11 @@
             <p class="fs-msgbar @(_messageIsError ? "fs-msgbar--error" : "fs-msgbar--info") tvr__msg">@_message</p>
         }
 
+        @if (needed > 0 && ends.Length > 0)
+        {
+            <p class="fs-msgbar fs-msgbar--warn tvr__msg">@L.Get("tv_remux.ends_seeding", string.Join(", ", ends))</p>
+        }
+
         @if (needed > 0)
         {
             <div class="tvr__actions">
@@ -102,7 +112,7 @@
     private const int MaxRows = 8;
     private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(3);
 
-    private sealed record RemuxStatus(bool Enabled, RemuxFile[]? Files);
+    private sealed record RemuxStatus(bool Enabled, RemuxFile[]? Files, string[]? EndsSeeding);
     private sealed record RemuxFile(string Path, string[]? Reasons, string Status, string? Error);
     private sealed record Problem(string? Code, string? Detail);
 
@@ -226,11 +236,11 @@
 
     private static string StatusTone(string status) => status switch
     {
-        "done"              => "success",
-        "running"           => "accent",
-        "queued"            => "info",
-        "needed" or "failed" => "warn",
-        _                   => "default",
+        "done"                    => "success",
+        "running"                 => "accent",
+        "queued" or "downloading" => "info",
+        "needed" or "failed"      => "warn",
+        _                         => "default",
     };
 
     public void Dispose()
