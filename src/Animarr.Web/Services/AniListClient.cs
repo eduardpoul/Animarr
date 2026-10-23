@@ -190,7 +190,7 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
             var http = httpFactory.CreateClient(ClientName);
             const string query = """
                 query($malId:Int){ Media(idMal:$malId, type:ANIME){
-                  idMal format status episodes duration source isAdult season seasonYear averageScore
+                  idMal format status episodes duration source isAdult season seasonYear averageScore countryOfOrigin
                   startDate{year month day} endDate{year month day}
                   title{romaji english native} description(asHtml:false) genres
                   studios(isMain:true){ nodes{ name } } coverImage{ extraLarge large }
@@ -222,6 +222,7 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
                 MediaType         = m.Format?.ToLowerInvariant(),
                 Source            = m.Source?.ToLowerInvariant(),
                 Nsfw              = m.IsAdult,
+                CountryOfOrigin   = m.CountryOfOrigin,
                 Genres            = (m.Genres ?? []).Select(g => new MalGenreWrapper { Name = g }).ToList(),
                 Studios           = (m.Studios?.Nodes ?? []).Where(s => !string.IsNullOrWhiteSpace(s.Name))
                                         .Select(s => new MalStudio { Name = s.Name! }).ToList(),
@@ -363,6 +364,8 @@ public sealed class AniListDetailMedia
     [JsonPropertyName("seasonYear")]   public int?    SeasonYear   { get; set; }
     /// <summary>0–100.</summary>
     [JsonPropertyName("averageScore")] public int?    AverageScore { get; set; }
+    /// <summary>ISO 3166 alpha-2: "JP", "CN" (donghua), "KR"…</summary>
+    [JsonPropertyName("countryOfOrigin")] public string? CountryOfOrigin { get; set; }
     [JsonPropertyName("startDate")]    public AniListFuzzyDate? StartDate { get; set; }
     [JsonPropertyName("endDate")]      public AniListFuzzyDate? EndDate   { get; set; }
     [JsonPropertyName("title")]        public AniListDetailTitle? Title { get; set; }

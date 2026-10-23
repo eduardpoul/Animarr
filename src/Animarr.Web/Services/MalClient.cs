@@ -126,6 +126,11 @@ public class MalAnime
     public string? Rating { get; set; }
     public bool? Nsfw { get; set; }
 
+    /// <summary>ISO 3166 country of origin ("JP", "CN", "KR") — not in the MAL
+    /// API; set when the detail came from AniList (GetAsMalAnimeAsync).</summary>
+    [JsonIgnore]
+    public string? CountryOfOrigin { get; set; }
+
     public int? Year => int.TryParse((StartDate ?? "").Split('-')[0], out var y) ? y : null;
     public string EnglishTitle => AlternativeTitles?.En ?? Title;
     public string? PosterUrl => MainPicture?.Large ?? MainPicture?.Medium;

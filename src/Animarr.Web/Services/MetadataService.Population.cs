@@ -217,12 +217,27 @@ public partial class MetadataService
         if (item.Studio is null && detail.StudioName is not null)      item.Studio      = detail.StudioName;
         if (item.Runtime is null && detail.RuntimeMinutes.HasValue)    item.Runtime     = detail.RuntimeMinutes;
         // MAL anime are Japanese by default — only set if not already set by a higher-priority TMDB pass.
-        item.Language     ??= "Japanese";
-        if (detail.NumEpisodes.HasValue && detail.NumEpisodes > 0)
+        // AniList says where a title is from: a donghua (CN) is Chinese.
+        item.Language     ??= LanguageNameMap.FromIso639(detail.CountryOfOrigin?.ToUpperInvariant() switch
+        {
+            "CN" or "TW" or "HK" => "zh",
+            "KR"                 => "ko",
+            _                    => "ja",
+        }) ?? "Japanese";
+
+        // A film: MAL's "movie", or one episode in a movie section / of an hour
+        // or more — a feature released as an ONA or special (MAL 64445: ONA,
+        // 1 ep, 92 min) used to become a one-episode series whose "Episode 1"
+        // never matched the folder's film. A film gets no synthetic season.
+        bool isMovie = string.Equals(detail.MediaType, "movie", StringComparison.OrdinalIgnoreCase)
+            || (detail.NumEpisodes is null or <= 1
+                && (folder.FolderType == FolderType.Movie || detail.RuntimeMinutes >= 60));
+        if (!isMovie && detail.NumEpisodes.HasValue && detail.NumEpisodes > 0)
             item.EpisodeCount = detail.NumEpisodes;
-        item.SeasonLabel  ??= detail.StartSeason is not null
-            ? $"{Capitalize(detail.StartSeason.Season)} {detail.StartSeason.Year}"
-            : null;
+        if (!isMovie)
+            item.SeasonLabel ??= detail.StartSeason is not null
+                ? $"{Capitalize(detail.StartSeason.Season)} {detail.StartSeason.Year}"
+                : null;
         item.Hue          ??= HueHash.For(item.Title);
         // MAL confidence proxy: num_scoring_users — 50k+ voters pegs at 1.0.
         item.MalConfidence = detail.NumScoringUsers.HasValue
@@ -232,14 +247,14 @@ public partial class MetadataService
         if (detail.Genres.Count > 0)
             item.GenresJson = JsonSerializer.Serialize(detail.Genres.Select(g => g.Name).ToList(), _json);
 
-        item.MediaType            = MediaItemType.Anime;
+        item.MediaType            = isMovie ? MediaItemType.Movie : MediaItemType.Anime;
         item.IdentificationStatus = IdentificationStatus.Identified;
 
         // MAL has no concept of seasons — the show is a single contiguous run.
         // Synthesise a Season 1 entry with NumEpisodes so MediaDetail renders
         // an episode list (each card marked ✓ or download based on file presence)
         // instead of an empty page.
-        if (string.IsNullOrEmpty(item.SeasonsJson) && (detail.NumEpisodes ?? 0) > 0)
+        if (!isMovie && string.IsNullOrEmpty(item.SeasonsJson) && (detail.NumEpisodes ?? 0) > 0)
         {
             item.SeasonsJson = JsonSerializer.Serialize(new[]
             {
