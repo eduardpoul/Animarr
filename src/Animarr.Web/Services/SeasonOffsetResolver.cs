@@ -37,6 +37,73 @@ public sealed class SeasonOffsetResolver(
     /// PascalCase casing) so the rewritten season list deserializes identically.</summary>
     private static readonly JsonSerializerOptions SeasonJson = new() { WriteIndented = false };
 
+    /// <summary>Disk-season sets a lazy check found nothing to do for (TMDB
+    /// already split, no air-date gap…): item → (signature, until), so a title
+    /// isn't re-fetched from TMDB on every open. Process-wide: the resolver is scoped.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (string Disk, DateTime Until)> _nothingFor = new();
+    private static readonly TimeSpan NothingForTtl = TimeSpan.FromHours(6);
+
+    /// <summary>
+    /// Re-derive the season split when a title's files show a season its
+    /// metadata doesn't know — a "Season 2" folder downloaded after the title
+    /// was identified (TMDB lists Dan Da Dan's two cours as one 24-episode
+    /// season; the offsets were only ever computed at identification, so disk
+    /// S2 stayed an orphan next to "Season 1 · 24 episodes"). Cheap when there
+    /// is nothing to do: no DB read without a disk season above 1. Returns the
+    /// item's folder id when its seasons changed (null otherwise).
+    /// </summary>
+    public async Task<Guid?> RefreshForFilesAsync(Guid mediaItemId, IReadOnlyList<Animarr.Shared.Models.MediaFileDto> files,
+        CancellationToken ct = default)
+    {
+        var disk = files.Where(f => f.Season is > 1 && f.Episode is > 0)
+                        .Select(f => f.Season!.Value).Distinct().Order().ToList();
+        if (disk.Count == 0) return null;
+        var signature = string.Join(",", disk);
+        if (_nothingFor.TryGetValue(mediaItemId, out var seen) && seen.Disk == signature && seen.Until > DateTime.UtcNow)
+            return null;
+
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var item = await db.MediaItems.AsNoTracking()
+            .Where(m => m.Id == mediaItemId)
+            .Select(m => new { m.TmdbId, m.MediaType, m.SeasonsJson, m.SeasonOffsetsJson, m.FolderId })
+            .FirstOrDefaultAsync(ct);
+        if (item is null || item.TmdbId is not > 0 || item.MediaType == Data.Models.MediaItemType.Movie) return null;
+
+        var known = new HashSet<int>();
+        try
+        {
+            foreach (var s in JsonSerializer.Deserialize<List<SeasonMeta>>(item.SeasonsJson ?? "[]", SeasonJson) ?? [])
+                known.Add(s.Number);
+        }
+        catch (JsonException) { }
+        if (!string.IsNullOrEmpty(item.SeasonOffsetsJson))
+        {
+            try
+            {
+                var map = JsonSerializer.Deserialize<Dictionary<string, int>>(item.SeasonOffsetsJson);
+                foreach (var k in map?.Keys ?? Enumerable.Empty<string>())
+                    if (int.TryParse(k, NumberStyles.None, CultureInfo.InvariantCulture, out var n)) known.Add(n);
+            }
+            catch (JsonException) { }
+        }
+        if (disk.All(known.Contains)) return null;
+
+        await ResolveAsync(mediaItemId, ct);
+        var after = await db.MediaItems.AsNoTracking()
+            .Where(m => m.Id == mediaItemId)
+            .Select(m => new { m.SeasonsJson, m.SeasonOffsetsJson })
+            .FirstOrDefaultAsync(ct);
+        if (after is not null && (after.SeasonsJson != item.SeasonsJson || after.SeasonOffsetsJson != item.SeasonOffsetsJson))
+        {
+            _nothingFor.TryRemove(mediaItemId, out _);
+            logger.LogInformation("SeasonOffset {Id}: disk season(s) {Disk} were missing from the metadata — re-split.",
+                mediaItemId, signature);
+            return item.FolderId;
+        }
+        _nothingFor[mediaItemId] = (signature, DateTime.UtcNow + NothingForTtl);
+        return null;
+    }
+
     /// <summary>Compute &amp; store per-season offsets. Returns the map written
     /// (diskSeason→offset), or null when nothing applies.</summary>
     public async Task<Dictionary<int, int>?> ResolveAsync(Guid mediaItemId, CancellationToken ct = default)

@@ -496,6 +496,8 @@ internal static class MediaEndpoints
         app.MapGet(ApiRoutes.MediaFiles, async (
             Guid id,
             MediaFileResolver resolver,
+            SeasonOffsetResolver seasonResolver,
+            MetadataService metadata,
             IDbContextFactory<AppDbContext> dbFactory,
             IUserContext userCtx,
             CancellationToken ct) =>
@@ -504,6 +506,13 @@ internal static class MediaEndpoints
             var me = await userCtx.GetCurrentUserAsync(ct);
             if (!await db.MediaItems.IsVisibleAsync(me?.Role, id, ct)) return Results.NotFound();
             var files = await resolver.ResolveAsync(id, ct);
+            // A season folder that arrived after identification: re-split the
+            // seasons now (offsets feed the resolver), and tell open pages.
+            if (await seasonResolver.RefreshForFilesAsync(id, files, ct) is Guid folderId)
+            {
+                files = await resolver.ResolveAsync(id, ct);
+                metadata.NotifyMediaItemChanged(folderId);
+            }
             return Results.Ok(files);
         });
 
