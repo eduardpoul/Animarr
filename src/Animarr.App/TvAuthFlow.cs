@@ -100,6 +100,10 @@ internal static class TvAuthFlow
     public static async Task SignOutAsync()
     {
         try { await Api.LogoutAsync(); } catch { }
+#if ANDROID
+        // The launcher's "Continue watching" cards were this profile's.
+        await Tv.TvWatchNext.ClearAsync();
+#endif
         try { await RouteOnOpenAsync(); }
         catch { TvRoot.Go(new PairingPage()); }
     }

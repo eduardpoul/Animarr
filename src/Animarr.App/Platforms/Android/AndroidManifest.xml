@@ -52,6 +52,11 @@
          grant, so the app never prompts for it. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- The launcher's "Continue watching" row (Android TV Watch Next):
+         TvProvider refuses an app's own watch_next_program rows without it
+         (WatchNextService). -->
+    <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" />
+
     <!-- "Открыть во внешнем плеере": package visibility (Android 11+) for the
          players the phone player offers by name, and any app that views video
          (the chooser). -->

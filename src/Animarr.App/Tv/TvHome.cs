@@ -31,6 +31,17 @@ public sealed class TvHomePage : ContentPage
         NavigationPage.SetHasNavigationBar(this, false);
         BackgroundColor = Microsoft.Maui.Graphics.Color.FromArgb("#1c1c1c");
         Content = new NativeHost(ctx => _view = new TvHomeView(ctx, this));
+        // On the page, not the view: the page stays in the stack under the
+        // player, so a launcher card tapped mid-episode still lands here.
+        MainActivity.DeepLinkArrived += OnDeepLinkArrived;
+    }
+
+    private void OnDeepLinkArrived() => Dispatcher.Dispatch(() => _view?.OnDeepLinkArrived());
+
+    protected override void OnHandlerChanging(HandlerChangingEventArgs args)
+    {
+        base.OnHandlerChanging(args);
+        if (args.NewHandler is null) MainActivity.DeepLinkArrived -= OnDeepLinkArrived;
     }
 
     protected override void OnAppearing()
@@ -142,7 +153,10 @@ internal sealed class TvHomeView : FrameLayout
                     _sectionFolders[s.Id] = ids;
                 }
 
-            _feed = MergeFeed(await contT, await nextT);
+            var cont = await contT;
+            var next = await nextT;
+            _feed = MergeFeed(cont, next);
+            TvWatchNext.Publish(_data, cont, next);
             _featured = _library.Where(i => !string.IsNullOrEmpty(i.FanartPath)).OrderByDescending(i => i.Rating ?? 0).FirstOrDefault();
             _heroIndex = 0;
 
@@ -150,6 +164,8 @@ internal sealed class TvHomeView : FrameLayout
             _lastRefresh = DateTime.UtcNow;
             Post(() => _hero?.FocusPrimary());
             ResumeCarousel();
+            _loaded = true;
+            TakeDeepLink();
         }
         catch (Exception ex) { Android.Util.Log.Warn("AnimarrTv", $"home load: {ex.Message}"); }
     }
@@ -196,6 +212,7 @@ internal sealed class TvHomeView : FrameLayout
         var cont = await _data.Get<TvData.ContinueItem[]>("/api/me/continue?take=12");
         var next = await _data.Get<TvData.ContinueItem[]>("/api/me/next-up?take=12");
         var feed = MergeFeed(cont, next);
+        TvWatchNext.Publish(_data, cont, next);
         _feed = feed;
         if (_heroIndex >= _feed.Length) _heroIndex = 0;
         _hero?.Bind(Hero());
@@ -387,6 +404,30 @@ internal sealed class TvHomeView : FrameLayout
     }
 
     internal void OpenLibrary(Guid? section) => _ = _page.Navigation.PushAsync(new TvLibraryPage(section));
+
+    private bool _loaded;
+
+    /// <summary>The app was running when the link came (TvHomePage forwards it);
+    /// before the first load it waits for the end of LoadAsync.</summary>
+    internal void OnDeepLinkArrived() { if (_loaded) TakeDeepLink(); }
+
+    /// <summary>A launcher card's <c>animarr://play/{id}</c> (kept by MainActivity
+    /// until a signed-in home takes it): resume that title — from the player or
+    /// a detail page, back to the home first.</summary>
+    private void TakeDeepLink()
+    {
+        if (MainActivity.DrainPendingDeepLink() is not { } id) return;
+        var item = _library.FirstOrDefault(i => string.Equals(i.Id, id, StringComparison.OrdinalIgnoreCase));
+        _page.Dispatcher.Dispatch(async () =>
+        {
+            if (_page.Navigation.NavigationStack.Count > 1)
+            {
+                await _page.Navigation.PopToRootAsync(false);
+                await Task.Delay(400);   // the player's last progress save
+            }
+            await PlayOrOpenAsync(id, item?.Title, item?.FanartPath);
+        });
+    }
 
     internal async Task PlayOrOpenAsync(string id, string? title, string? fanart)
     {

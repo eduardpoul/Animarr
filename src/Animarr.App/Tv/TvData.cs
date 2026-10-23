@@ -78,7 +78,8 @@ internal sealed class TvData
 
     public sealed record ContinueItem(
         string MediaItemId, string? Title, string? PosterPath, string? FanartPath,
-        int? Year, int? Season, int? Episode, double Progress, bool IsNew);
+        int? Year, int? Season, int? Episode, double Progress, bool IsNew,
+        long? ProgressMs = null, long? RuntimeMs = null, DateTime? LastSeenAt = null);
 
     public sealed record CalendarEvent(
         string MediaItemId, string? Title, string? PosterUrl, string? BackdropUrl,

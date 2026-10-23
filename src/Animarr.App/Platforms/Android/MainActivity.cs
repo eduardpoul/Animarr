@@ -77,6 +77,10 @@ public class MainActivity : MauiAppCompatActivity
     /// <summary>Atomic read + clear of <see cref="PendingDeepLinkMediaId"/> —
     /// the JS bridge calls this once on Blazor mount so the same Intent
     /// doesn't keep redirecting on subsequent renders.</summary>
+    /// <summary>A deep link came in while the app was running (a launcher card
+    /// tapped) — the native TV home drains it.</summary>
+    public static event Action? DeepLinkArrived;
+
     public static string? DrainPendingDeepLink()
     {
         var id = PendingDeepLinkMediaId;
@@ -307,8 +311,11 @@ public class MainActivity : MauiAppCompatActivity
         // The app was already running: the signed-in layout drains the link
         // now (a constant script — the id stays on this side until asked for).
         if (PendingDeepLinkMediaId is not null)
+        {
             try { FindWebView(Window?.DecorView)?.EvaluateJavascript("window.animarrDeepLinkArrived && window.animarrDeepLinkArrived();", null); }
             catch { /* no WebView (TV shell) — Welcome / the next layout picks it up */ }
+            DeepLinkArrived?.Invoke();   // the native TV home
+        }
     }
 
     /// <summary>Forward Android's system back gesture (edge swipe / hardware
@@ -648,6 +655,9 @@ public class MainActivity : MauiAppCompatActivity
         {
             Android.Util.Log.Warn("Animarr.NativePlayer", $"OnHostActivityStopped threw: {ex.Message}");
         }
+        // Back to the launcher: its "Continue watching" cards follow what was
+        // just watched (TV, signed in only).
+        Tv.TvWatchNext.RefreshSoon();
     }
 
     /// <summary>Home / Recents while the phone's native player plays: below
