@@ -28,6 +28,7 @@ internal static class TorrentMappings
             UploadLimit     = entity.UploadLimit,
             StopSeedingRatio = entity.StopSeedingRatio,
             StopAfterDownload = entity.StopAfterDownload,
+            TvRemuxedAt       = entity.TvRemuxedAt,
             SkipSubfolderStructure = entity.SkipSubfolderStructure,
             SuppressRootFolder = entity.SuppressRootFolder,
             CustomRootFolderName = entity.CustomRootFolderName,

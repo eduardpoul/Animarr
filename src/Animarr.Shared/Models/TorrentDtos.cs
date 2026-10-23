@@ -32,6 +32,11 @@ public sealed record TorrentRecordDto
     public double? StopSeedingRatio { get; init; }
     public bool    StopAfterDownload { get; init; }
 
+    /// <summary>Set when "Optimize for TV" took the finished torrent's files to
+    /// rewrite them in place: its seeding is over for good, it can't be started
+    /// or rechecked again.</summary>
+    public DateTime? TvRemuxedAt { get; init; }
+
     public bool    SkipSubfolderStructure { get; init; }
     public bool    SuppressRootFolder { get; init; }
     public string? CustomRootFolderName { get; init; }
