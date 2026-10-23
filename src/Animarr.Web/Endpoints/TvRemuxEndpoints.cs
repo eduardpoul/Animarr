@@ -4,8 +4,8 @@ using Animarr.Web.Services.Auth;
 namespace Animarr.Web.Endpoints;
 
 /// <summary>
-/// "Optimize for TV" remux per title (<see cref="TvRemuxService"/>):
-/// status, start, and removal of the copies. Admin-only (system settings
+/// "Optimize for TV" remux per title (<see cref="TvRemuxService"/>, in
+/// place — no copies): status and start. Admin-only (system settings
 /// policy), like the setting that enables the feature
 /// (<c>playback.tv_remux_enabled</c> through the AppConfig PUT).
 /// </summary>
@@ -34,9 +34,6 @@ internal static class TvRemuxEndpoints
                 ? Results.NotFound()
                 : Results.Accepted(value: new { enabled = true, files });
         });
-
-        admin.MapDelete("", async (Guid mediaItemId, TvRemuxService remux, CancellationToken ct) =>
-            Results.Ok(new { deleted = await remux.DeleteCopiesAsync(mediaItemId, ct) }));
 
         return app;
     }

@@ -53,6 +53,12 @@ public class TorrentRecord
     /// <summary>If true, stop torrent immediately after download completes (skip seeding).</summary>
     public bool StopAfterDownload { get; set; } = false;
 
+    /// <summary>When "Optimize for TV" took this finished torrent's files to be
+    /// rewritten in place (TvRemuxService). The data no longer matches its
+    /// pieces, so the torrent never starts again — a recheck would re-download
+    /// the "missing" pieces over the remuxed files. Null = a normal torrent.</summary>
+    public DateTime? TvRemuxedAt { get; set; }
+
     /// <summary>If true, files are downloaded directly to SavePath root without subfolder structure.</summary>
     [Column("FlattenSubfolders")]
     public bool SkipSubfolderStructure { get; set; } = false;

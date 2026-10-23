@@ -332,7 +332,8 @@ public class TorrentEngineService : BackgroundService
                 // in a boot loop; the user retries it via Recheck.
                 if (record.State is not (TorrentRecordState.Stopped
                                       or TorrentRecordState.Paused
-                                      or TorrentRecordState.Error))
+                                      or TorrentRecordState.Error)
+                    && record.TvRemuxedAt is null)
                     await mgr.StartAsync();
             }
             catch (Exception ex)
@@ -391,6 +392,45 @@ public class TorrentEngineService : BackgroundService
                 }
             });
         };
+    }
+
+    /// <summary>
+    /// A finished torrent with files "Optimize for TV" rewrites in place
+    /// (<see cref="TvRemuxService"/>, when enabled): stop it for good and queue
+    /// those files. The remuxed data no longer matches the torrent's pieces —
+    /// pieces span file boundaries, so even one rewritten file breaks its
+    /// neighbours' too — and a seeding torrent would hand peers bad data or,
+    /// after a recheck, re-download "missing" pieces over the new files.
+    /// <see cref="TorrentRecord.TvRemuxedAt"/> keeps it from ever starting again.
+    /// True when it took the torrent.
+    /// </summary>
+    private async Task<bool> HandOverForTvRemuxAsync(TorrentManager mgr, TorrentRecord record,
+        IReadOnlyList<string> filePaths, AppDbContext ctx, IServiceProvider services)
+    {
+        var remux = services.GetRequiredService<TvRemuxService>();
+        if (!await remux.IsEnabledAsync(CancellationToken.None)) return false;
+        var needing = await remux.NeedingRemuxAsync(filePaths, CancellationToken.None);
+        if (needing.Count == 0) return false;
+
+        record.TvRemuxedAt = DateTime.UtcNow;
+        record.State       = TorrentRecordState.Stopped;
+        await ctx.SaveChangesAsync();
+        _persisted.TryRemove(record.InfoHash, out _);
+        await mgr.StopAsync();
+        await remux.QueueFilesAsync(needing, CancellationToken.None);
+        _logger.LogInformation("[TV remux] torrent {Name} finished — seeding ended, {Count} file(s) to be remuxed in place",
+            record.Name, needing.Count);
+        return true;
+    }
+
+    /// <summary>Whether this torrent's files were handed over to be rewritten
+    /// for TV — then it must not start (see <see cref="HandOverForTvRemuxAsync"/>).</summary>
+    private async Task<bool> IsTvRemuxedAsync(string infoHash)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using var ctx = await db.CreateDbContextAsync();
+        return await ctx.TorrentRecords.AnyAsync(r => r.InfoHash == infoHash && r.TvRemuxedAt != null);
     }
 
     private async Task OnStateChangedAsync(TorrentManager mgr, string infoHash)
@@ -465,6 +505,18 @@ public class TorrentEngineService : BackgroundService
                     if (cleared > 0)
                         _logger.LogInformation("[Segments] torrent {Hash} done → cleared segment/trickplay scan gates for its title", infoHash);
                 }
+
+                // "Optimize for TV" rewrites files a TV handles badly in place,
+                // right after the download: that torrent's seeding ends here.
+                if (filePaths.Count > 0 && await HandOverForTvRemuxAsync(mgr, record, filePaths, ctx, scope.ServiceProvider))
+                    return;
+            }
+
+            // A torrent handed over for TV remux never seeds again (restart path).
+            if (record.TvRemuxedAt is not null)
+            {
+                await mgr.StopAsync();
+                return;
             }
 
             // Stop seeding check
@@ -1206,6 +1258,11 @@ public class TorrentEngineService : BackgroundService
     public async Task ResumeAsync(string infoHash)
     {
         if (!_managers.TryGetValue(infoHash, out var mgr)) return;
+        if (await IsTvRemuxedAsync(infoHash))
+        {
+            _logger.LogInformation("Not resuming {Hash}: its files were remuxed for TV — its seeding is over", infoHash);
+            return;
+        }
         await mgr.StartAsync();
         await SetRecordStateAsync(infoHash, TorrentRecordState.Downloading);
         UpdateLiveStats(); StateChanged?.Invoke();
@@ -1218,6 +1275,12 @@ public class TorrentEngineService : BackgroundService
     public async Task RecheckAsync(string infoHash)
     {
         if (!_managers.TryGetValue(infoHash, out var mgr)) return;
+        // A recheck of rewritten files would re-download them (see HandOverForTvRemuxAsync).
+        if (await IsTvRemuxedAsync(infoHash))
+        {
+            _logger.LogInformation("Not rechecking {Hash}: its files were remuxed for TV", infoHash);
+            return;
+        }
         try { if (mgr.State != TorrentState.Stopped) await mgr.StopAsync(); } catch { }
 
         // Clear the stale error + optimistically mark downloading; the state

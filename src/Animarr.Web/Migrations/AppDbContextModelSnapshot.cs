@@ -933,6 +933,9 @@ namespace Animarr.Web.Migrations
                     b.Property<long>("TotalSize")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("TvRemuxedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("UploadLimit")
                         .HasColumnType("INTEGER");
 

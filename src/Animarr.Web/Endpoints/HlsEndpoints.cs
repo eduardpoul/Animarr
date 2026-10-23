@@ -128,7 +128,6 @@ internal static class HlsEndpoints
             string? renditionOffsets,
             TrackPreferenceService trackPrefs,
             IUserContext userCtx,
-            TvRemuxService tvRemux,
             HlsSessionService hls,
             PlaybackFailureService failures,
             DeviceTrust deviceTrust,
@@ -244,17 +243,6 @@ internal static class HlsEndpoints
                     maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0,
                     allowDirectPlay: !steps.NoDirectPlay, allowDirectStream: !steps.NoDirectStream)
                 : new HlsSessionService.PlaybackDecision(false, null, 0, null);
-            // An "optimize for TV" copy (TvRemuxService: MKV with Cues in
-            // .animarr, same streams in the same order) is what Direct Play
-            // serves when the source itself can't be played directly.
-            if (!decision.DirectPlay && externalAudioFull is null && !burning
-                && await tvRemux.FreshCopyOfAsync(fullPath!, http.RequestAborted) is { } tvCopy)
-            {
-                var copyDecision = await hls.ChoosePlaybackAsync(tvCopy, client, http.RequestAborted,
-                    maxHeight: effectiveMaxHeight, maxBitrate: maxBitrate ?? 0, audioTrackIndex: audioTrackIndex ?? 0,
-                    allowDirectPlay: !steps.NoDirectPlay);
-                if (copyDecision.DirectPlay && copyDecision.DirectUrl is not null) decision = copyDecision;
-            }
             // localTracks: the client switches the remembered track itself only
             // on Direct Play; anywhere else the server maps it — the Direct
             // Stream remux takes the track too (B19), so decide again with it.
