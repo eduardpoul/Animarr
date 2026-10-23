@@ -291,6 +291,11 @@ public sealed partial class HlsSessionService
     ///   • never above what the source itself spends — re-encoding a 3 Mbps
     ///     file at 12 Mbps adds bytes, not quality. H.264 is given 1.5× the
     ///     budget of a HEVC / AV1 / VP9 source (same picture, older codec);
+    ///     a downscale gets that budget scaled by its share of the source's
+    ///     pixels to the power 0.75 (= the height ratio to the 1.5: bitrate
+    ///     grows slower than the pixel count). Without it a 720p rung of a
+    ///     5.6 Mbps HEVC 1080p ran at the 6 Mbps ladder — more than the
+    ///     original it was picked to save on;
     ///   • the player's Bitrate menu (<paramref name="maxBitrateMbps"/>) is a
     ///     ceiling on top: "≤ N Mbps" — it no longer raises a 720p rung to N;
     ///   • never below <see cref="MinEncodeKbps"/>.
@@ -302,7 +307,9 @@ public sealed partial class HlsSessionService
         if (srcBps > 0)
         {
             var efficient = (source!.VideoCodec ?? "").ToLowerInvariant() is "hevc" or "av1" or "vp9";
-            kbps = Math.Min(kbps, (long)(srcBps / 1000.0 * (efficient ? 1.5 : 1.0)));
+            var share = outHeight > 0 && source.Height > outHeight
+                ? Math.Pow((double)outHeight / source.Height, 1.5) : 1.0;
+            kbps = Math.Min(kbps, (long)(srcBps / 1000.0 * (efficient ? 1.5 : 1.0) * share));
         }
         if (maxBitrateMbps > 0) kbps = Math.Min(kbps, (long)maxBitrateMbps * 1000);
         return new EncodeRate(Math.Max(kbps, MinEncodeKbps));

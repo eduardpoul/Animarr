@@ -5534,8 +5534,9 @@
     /** The video bitrate (Mbps) a re-encode of THIS file to height `h` runs
      *  at — mirrors RateFor: the ladder, never above what the source spends
      *  (×1.5 for a HEVC / AV1 / VP9 source: H.264 needs more for the same
-     *  picture), under a "≤ N Mbps" cap, never below 0.8. null while the
-     *  source isn't probed (no honest estimate then). */
+     *  picture; a downscale × (h / source height)^1.5), under a "≤ N Mbps"
+     *  cap, never below 0.8. null while the source isn't probed (no honest
+     *  estimate then). */
     function encodeMbpsFor(entry, h, capMbps) {
         const mi = entry && entry.mediaInfo;
         if (!mi) return null;
@@ -5543,7 +5544,8 @@
         const srcBps = mi.videoBitrate > 0 ? mi.videoBitrate : (mi.bitrate || 0);
         if (srcBps > 0) {
             const efficient = /^(hevc|h265|av1|vp9)$/i.test(mi.videoCodec || '');
-            m = Math.min(m, srcBps / 1e6 * (efficient ? 1.5 : 1));
+            const share = h > 0 && mi.height > h ? Math.pow(h / mi.height, 1.5) : 1;
+            m = Math.min(m, srcBps / 1e6 * (efficient ? 1.5 : 1) * share);
         }
         if (capMbps > 0) m = Math.min(m, capMbps);
         return Math.max(m, 0.8);
