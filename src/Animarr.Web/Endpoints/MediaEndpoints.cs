@@ -263,7 +263,18 @@ internal static class MediaEndpoints
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (entity is null) return Results.NotFound();
 
-            await metadata.ApplyManualAsync(entity.FolderId, request.Source, request.ExternalId, ct);
+            try
+            {
+                await metadata.ApplyManualAsync(entity.FolderId, request.Source, request.ExternalId, ct);
+            }
+            catch (MetadataApplyException ex)
+            {
+                // A malformed / unknown ID: 422 with a code the drawer localizes
+                // (it used to escape as a 500 with a misleading message).
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity,
+                    title: "Metadata could not be applied",
+                    extensions: new Dictionary<string, object?> { ["code"] = ex.Code });
+            }
 
             // ApplyManualAsync updates the row via its own DbContext; reload
             // from a fresh context so we return the new state.

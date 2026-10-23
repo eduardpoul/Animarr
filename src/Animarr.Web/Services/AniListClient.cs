@@ -178,6 +178,74 @@ public class AniListClient(IHttpClientFactory httpFactory, ILogger<AniListClient
             n.CoverImage?.Large, n.Status);
     }
 
+    /// <summary>The anime AniList files under a MyAnimeList id, shaped as the
+    /// MAL v2 detail (<see cref="MalAnime"/>) so MAL population can use it
+    /// as is — the stand-in when MAL itself won't answer (no Client ID set,
+    /// 403, outage). Null = no such anime, rate limited or unreachable.</summary>
+    public async Task<MalAnime?> GetAsMalAnimeAsync(int malId, CancellationToken ct = default)
+    {
+        if (malId <= 0 || RateLimitRemaining > TimeSpan.Zero) return null;
+        try
+        {
+            var http = httpFactory.CreateClient(ClientName);
+            const string query = """
+                query($malId:Int){ Media(idMal:$malId, type:ANIME){
+                  idMal format status episodes duration source isAdult season seasonYear averageScore
+                  startDate{year month day} endDate{year month day}
+                  title{romaji english native} description(asHtml:false) genres
+                  studios(isMain:true){ nodes{ name } } coverImage{ extraLarge large }
+                } }
+                """;
+            var payload = new { query, variables = new { malId } };
+
+            using var resp = await http.PostAsJsonAsync("/", payload, _json, ct);
+            if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests) { NoteRateLimited(resp); return null; }
+            if (!resp.IsSuccessStatusCode) return null;
+
+            var m = (await resp.Content.ReadFromJsonAsync<AniListDetailEnvelope>(_json, ct))?.Data?.Media;
+            if (m is null) return null;
+            return new MalAnime
+            {
+                Id                = m.IdMal ?? malId,
+                Title             = m.Title?.Romaji ?? m.Title?.English ?? m.Title?.Native ?? $"#{malId}",
+                AlternativeTitles = new MalAlternativeTitles { En = m.Title?.English, Ja = m.Title?.Native },
+                MainPicture       = m.CoverImage is { } c
+                    ? new MalPicture { Large = c.ExtraLarge ?? c.Large, Medium = c.Large } : null,
+                StartDate         = m.StartDate?.ToIso(),
+                EndDate           = m.EndDate?.ToIso(),
+                Synopsis          = PlainText(m.Description),
+                // AniList scores 0–100; MAL's mean is 0–10. AniList's popularity
+                // is a user count, not MAL's rank — left out rather than mixed.
+                Mean              = m.AverageScore / 10.0,
+                NumEpisodes       = m.Episodes,
+                AverageEpisodeDuration = m.Duration * 60,
+                MediaType         = m.Format?.ToLowerInvariant(),
+                Source            = m.Source?.ToLowerInvariant(),
+                Nsfw              = m.IsAdult,
+                Genres            = (m.Genres ?? []).Select(g => new MalGenreWrapper { Name = g }).ToList(),
+                Studios           = (m.Studios?.Nodes ?? []).Where(s => !string.IsNullOrWhiteSpace(s.Name))
+                                        .Select(s => new MalStudio { Name = s.Name! }).ToList(),
+                StartSeason       = m.Season is { Length: > 0 } s && m.SeasonYear is int y
+                    ? new MalSeason { Season = s.ToLowerInvariant(), Year = y } : null,
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[AniList] detail fetch failed for mal={Mal}", malId);
+            return null;
+        }
+
+        // description(asHtml:false) still carries <br> / <i> tags and entities.
+        static string? PlainText(string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"<br\s*/?>", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            s = System.Text.RegularExpressions.Regex.Replace(s, "<[^>]+>", "");
+            s = System.Text.RegularExpressions.Regex.Replace(System.Net.WebUtility.HtmlDecode(s), @"\n{3,}", "\n\n");
+            return s.Trim();
+        }
+    }
+
     /// <summary>Batch airing lookup — one Page query covers up to 50 titles, so
     /// a whole library of ongoings costs a single request per tick. Query by
     /// AniList ids and/or MAL ids (donghua usually exist on AniList WITHOUT a
@@ -267,6 +335,77 @@ public sealed class AniListTitle
 {
     [JsonPropertyName("romaji")]  public string? Romaji  { get; set; }
     [JsonPropertyName("english")] public string? English { get; set; }
+}
+
+// ── detail-by-MAL-id DTOs ────────────────────────────────────────────────────
+
+public sealed class AniListDetailEnvelope
+{
+    [JsonPropertyName("data")] public AniListDetailData? Data { get; set; }
+}
+
+public sealed class AniListDetailData
+{
+    [JsonPropertyName("Media")] public AniListDetailMedia? Media { get; set; }
+}
+
+public sealed class AniListDetailMedia
+{
+    [JsonPropertyName("idMal")]        public int?    IdMal        { get; set; }
+    [JsonPropertyName("format")]       public string? Format       { get; set; }
+    [JsonPropertyName("status")]       public string? Status       { get; set; }
+    [JsonPropertyName("episodes")]     public int?    Episodes     { get; set; }
+    /// <summary>Minutes per episode.</summary>
+    [JsonPropertyName("duration")]     public int?    Duration     { get; set; }
+    [JsonPropertyName("source")]       public string? Source       { get; set; }
+    [JsonPropertyName("isAdult")]      public bool?   IsAdult      { get; set; }
+    [JsonPropertyName("season")]       public string? Season       { get; set; }
+    [JsonPropertyName("seasonYear")]   public int?    SeasonYear   { get; set; }
+    /// <summary>0–100.</summary>
+    [JsonPropertyName("averageScore")] public int?    AverageScore { get; set; }
+    [JsonPropertyName("startDate")]    public AniListFuzzyDate? StartDate { get; set; }
+    [JsonPropertyName("endDate")]      public AniListFuzzyDate? EndDate   { get; set; }
+    [JsonPropertyName("title")]        public AniListDetailTitle? Title { get; set; }
+    [JsonPropertyName("description")]  public string? Description  { get; set; }
+    [JsonPropertyName("genres")]       public List<string>? Genres { get; set; }
+    [JsonPropertyName("studios")]      public AniListStudios? Studios { get; set; }
+    [JsonPropertyName("coverImage")]   public AniListDetailCover? CoverImage { get; set; }
+}
+
+public sealed class AniListDetailTitle
+{
+    [JsonPropertyName("romaji")]  public string? Romaji  { get; set; }
+    [JsonPropertyName("english")] public string? English { get; set; }
+    [JsonPropertyName("native")]  public string? Native  { get; set; }
+}
+
+public sealed class AniListFuzzyDate
+{
+    [JsonPropertyName("year")]  public int? Year  { get; set; }
+    [JsonPropertyName("month")] public int? Month { get; set; }
+    [JsonPropertyName("day")]   public int? Day   { get; set; }
+
+    /// <summary>MAL's date shape: "2026-10-01", or just "2026" / "2026-10".</summary>
+    public string? ToIso() => Year is not int y ? null
+        : Month is not int m ? $"{y:D4}"
+        : Day is not int d ? $"{y:D4}-{m:D2}"
+        : $"{y:D4}-{m:D2}-{d:D2}";
+}
+
+public sealed class AniListStudios
+{
+    [JsonPropertyName("nodes")] public List<AniListStudio>? Nodes { get; set; }
+}
+
+public sealed class AniListStudio
+{
+    [JsonPropertyName("name")] public string? Name { get; set; }
+}
+
+public sealed class AniListDetailCover
+{
+    [JsonPropertyName("extraLarge")] public string? ExtraLarge { get; set; }
+    [JsonPropertyName("large")]      public string? Large      { get; set; }
 }
 
 // ── airing batch DTOs ────────────────────────────────────────────────────────

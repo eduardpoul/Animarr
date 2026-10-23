@@ -186,7 +186,15 @@ public partial class MetadataService
         MediaItem item, FolderWatcher folder, int malId, Action<string>? log, CancellationToken ct)
     {
         var detail = await mal.GetDetailAsync(malId, ct);
-        if (detail is null) { log?.Invoke($"[MAL] GetDetail({malId}) returned null."); return false; }
+        if (detail is null)
+        {
+            // MAL won't answer without a Client ID (Settings → Metadata) and
+            // refuses now and then; AniList files the same anime under the MAL
+            // id, free and keyless.
+            detail = await aniList.GetAsMalAnimeAsync(malId, ct);
+            if (detail is not null) log?.Invoke($"[MAL] unavailable — MAL id {malId} taken from AniList.");
+        }
+        if (detail is null) { log?.Invoke($"[MAL] GetDetail({malId}) returned null (AniList neither)."); return false; }
 
         log?.Invoke($"[MAL] Detail: \"{detail.EnglishTitle ?? detail.Title}\" id={detail.Id}");
 

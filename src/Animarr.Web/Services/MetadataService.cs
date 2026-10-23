@@ -415,77 +415,43 @@ public partial class MetadataService(
         // the file manager.
     }
 
-    // ── Public: manual identification by numeric ID ───────────────────────────
+    // ── Public: manual identification by ID ───────────────────────────────────
 
-    public async Task ApplyManualAsync(Guid folderId, string source, int externalId, CancellationToken ct = default)
-    {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var folder = await db.FolderWatchers.FindAsync([folderId], ct);
-        if (folder is null) return;
+    public Task ApplyManualAsync(Guid folderId, string source, int externalId, CancellationToken ct = default)
+        => ApplyManualAsync(folderId, source, externalId.ToString(System.Globalization.CultureInfo.InvariantCulture), ct);
 
-        var item = await db.MediaItems.FirstOrDefaultAsync(m => m.FolderId == folderId, ct)
-                   ?? new MediaItem { Id = Guid.NewGuid(), FolderId = folderId, CreatedAt = DateTime.UtcNow };
-        bool isNew = !await db.MediaItems.AnyAsync(m => m.Id == item.Id, ct);
+    [System.Text.RegularExpressions.GeneratedRegex(@"^tt\d{7,10}$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex ImdbIdRegex();
 
-        // Clear stale metadata so we get a clean slate
-        item.TmdbId = null; item.ImdbId = null; item.TvdbId = null; item.MalId = null;
-        item.PosterPath = null; item.FanartPath = null; item.LogoPath = null;
-        // New design fields: clear too so a re-identify against a different source can't carry over
-        // a stale studio/language/tags string from the previous match.
-        item.Studio = null; item.Language = null; item.EpisodeCount = null; item.SeasonLabel = null;
-        item.CjkTitle = null; item.EnglishTitle = null; item.TagsJson = null;
-        item.TmdbConfidence = null; item.MalConfidence = null; item.ImdbConfidence = null;
-        // Hue is intentionally preserved across re-identify — the user may have manually edited it,
-        // and the same title should keep its tint even after switching source.
-
-        bool ok = source switch
-        {
-            "tmdb_tv"    => await PopulateTvFromTmdbAsync(item, folder, externalId, true, null, ct),
-            "tmdb_movie" => await PopulateMovieFromTmdbAsync(item, folder, externalId, true, null, ct),
-            "mal"        => await PopulateFromMalAsync(item, folder, externalId, null, ct),
-            _            => false,
-        };
-
-        // TMDB IDs don't overlap between /tv/ and /movie/, but a folder's
-        // initial MediaType guess (which decides which endpoint we tried first)
-        // is frequently wrong — a "Movies" section can contain a series and
-        // vice versa. So if the first endpoint 404'd, transparently try the
-        // other one. PopulateXxxFromTmdb sets MediaType to Series/Movie itself,
-        // so the item ends up correctly typed regardless of the folder's guess.
-        if (!ok && source == "tmdb_tv")
-        {
-            ok = await PopulateMovieFromTmdbAsync(item, folder, externalId, true, null, ct);
-            if (ok) source = "tmdb_movie";
-        }
-        else if (!ok && source == "tmdb_movie")
-        {
-            ok = await PopulateTvFromTmdbAsync(item, folder, externalId, true, null, ct);
-            if (ok) source = "tmdb_tv";
-        }
-
-        if (ok)
-        {
-            await FillMissingImagesAsync(item, folder, true, null, ct);
-            await FillThemeMusicAsync(item, folder, true, null, ct);
-            item.IdentificationStatus    = IdentificationStatus.Manual;
-            item.LastMetadataRefreshedAt = DateTime.UtcNow;
-        }
-
-        if (isNew) db.MediaItems.Add(item);
-        await db.SaveChangesAsync(ct);
-        if (ok) NotifyMediaItemChanged(folderId);
-        if (!ok)
-        {
-            var hint = source.StartsWith("tmdb", StringComparison.Ordinal)
-                ? await BuildTmdbErrorHintAsync(externalId.ToString(), source, ct)
-                : $"ID «{externalId}» not found in source '{source}'.";
-            throw new InvalidOperationException(hint);
-        }
-    }
-
-    /// <summary>Apply metadata using a string external ID (IMDb "tt...", TVDB integer as string).</summary>
+    /// <summary>
+    /// The edit drawer's "Apply" next to a source ID: re-identify the title
+    /// from that one source — TMDB (tv / movie, numeric), MAL (numeric),
+    /// IMDb ("tt…", via TMDB's find) or TVDB (numeric, via TMDB's find).
+    /// The ID's shape is checked first, and a failure changes nothing: the
+    /// clean slate below is only saved once the source answered. (It used to
+    /// be saved either way — a MAL number pasted into the IMDb field wiped the
+    /// title's TMDB id, poster and studio, then answered 500.)
+    /// Throws <see cref="MetadataApplyException"/> with a code for the UI.
+    /// </summary>
     public async Task ApplyManualAsync(Guid folderId, string source, string externalId, CancellationToken ct = default)
     {
+        externalId = (externalId ?? "").Trim();
+        int numId = 0;
+        if (source is "tmdb_tv" or "tmdb_movie" or "mal" or "tvdb_tv")
+        {
+            if (!int.TryParse(externalId, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out numId) || numId <= 0)
+                throw new MetadataApplyException("id_format", $"«{externalId}» is not a numeric {source} ID.");
+        }
+        else if (source is "imdb_tv" or "imdb_movie")
+        {
+            if (!ImdbIdRegex().IsMatch(externalId))
+                throw new MetadataApplyException("imdb_id_format",
+                    $"«{externalId}» is not an IMDb ID — they look like tt1234567.");
+            externalId = externalId.ToLowerInvariant();
+        }
+        else throw new MetadataApplyException("unknown_source", $"Unknown source '{source}'.");
+
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var folder = await db.FolderWatchers.FindAsync([folderId], ct);
         if (folder is null) return;
@@ -505,30 +471,27 @@ public partial class MetadataService(
         // Hue is intentionally preserved across re-identify — the user may have manually edited it,
         // and the same title should keep its tint even after switching source.
 
-        bool ok = false;
-        // tmdb_* / mal arrive here as a NUMERIC STRING — the /resolve endpoint
-        // always calls this string overload (ResolveCandidateRequest.ExternalId
-        // is a string). Previously only imdb/tvdb were handled here, so clicking
-        // "Apply" on the TMDB or MAL field silently did nothing (the int overload
-        // that handles tmdb/mal is never reached from the UI). Parse + delegate.
-        if ((source is "tmdb_tv" or "tmdb_movie" or "mal") && int.TryParse(externalId, out var numId))
+        bool ok;
+        if (source is "tmdb_tv" or "tmdb_movie" or "mal")
         {
             ok = source switch
             {
                 "tmdb_tv"    => await PopulateTvFromTmdbAsync(item, folder, numId, true, null, ct),
                 "tmdb_movie" => await PopulateMovieFromTmdbAsync(item, folder, numId, true, null, ct),
-                "mal"        => await PopulateFromMalAsync(item, folder, numId, null, ct),
-                _            => false,
+                _            => await PopulateFromMalAsync(item, folder, numId, null, ct),
             };
-            // tv <-> movie fallback (mirror of the int overload): a pasted TMDB id
-            // often doesn't tell whether the title is filed as TV or Movie.
+            // TMDB IDs don't overlap between /tv/ and /movie/, but the folder's
+            // guess of which one to try first is often wrong (a "Movies" section
+            // can hold a series), so a miss tries the other. PopulateXxxFromTmdb
+            // sets MediaType itself.
             if (!ok && source == "tmdb_tv")         ok = await PopulateMovieFromTmdbAsync(item, folder, numId, true, null, ct);
             else if (!ok && source == "tmdb_movie") ok = await PopulateTvFromTmdbAsync(item, folder, numId, true, null, ct);
         }
-        else if (source is "imdb_tv" or "imdb_movie" or "tvdb_tv")
+        else
         {
-            var findSource = source.StartsWith("imdb") ? "imdb_id" : "tvdb_id";
+            var findSource = source.StartsWith("imdb", StringComparison.Ordinal) ? "imdb_id" : "tvdb_id";
             var findResult = await tmdb.FindByExternalIdAsync(externalId, findSource, ct);
+            ok = false;
             if (findResult is not null)
             {
                 if (source == "imdb_movie" && findResult.MovieResults.Count > 0)
@@ -540,47 +503,43 @@ public partial class MetadataService(
             }
 
             // Fallback: populate directly from imdbapi.dev (no TMDB key required)
-            if (!ok && source.StartsWith("imdb"))
+            if (!ok && findSource == "imdb_id")
                 ok = await PopulateFromImdbDirectAsync(item, folder, externalId, true, null, ct);
 
-            // Always store the user-entered external ID
-            if (source.StartsWith("imdb"))
-                item.ImdbId = externalId;
-            else if (source == "tvdb_tv" && int.TryParse(externalId, out var tvdbInt))
-                item.TvdbId = tvdbInt;
+            // Keep the ID the user entered on the title it identified.
+            if (ok && findSource == "imdb_id") item.ImdbId = externalId;
+            else if (ok)                       item.TvdbId = numId;
         }
 
-        if (ok)
+        if (!ok)
         {
-            await FillMissingImagesAsync(item, folder, true, null, ct);
-            await FillThemeMusicAsync(item, folder, true, null, ct);
-            item.IdentificationStatus    = IdentificationStatus.Manual;
-            item.LastMetadataRefreshedAt = DateTime.UtcNow;
+            var (code, message) = await ApplyFailureAsync(externalId, source, ct);
+            throw new MetadataApplyException(code, message);
         }
+
+        await FillMissingImagesAsync(item, folder, true, null, ct);
+        await FillThemeMusicAsync(item, folder, true, null, ct);
+        item.IdentificationStatus    = IdentificationStatus.Manual;
+        item.LastMetadataRefreshedAt = DateTime.UtcNow;
 
         if (isNew) db.MediaItems.Add(item);
         await db.SaveChangesAsync(ct);
-
-        if (!ok)
-            throw new InvalidOperationException(
-                $"ID \u00ab{externalId}\u00bb: metadata fetch failed. " +
-                $"imdbapi.dev returned no data for this ID (check the ID is correct and starts with 'tt').");
+        NotifyMediaItemChanged(folderId);
     }
-    /// <summary>
-    /// Builds a human-readable error message for a failed TMDB manual lookup.
-    /// Distinguishes between: missing/invalid API key, ID exists but wrong media type, ID doesn't exist.
-    /// </summary>
-    private async Task<string> BuildTmdbErrorHintAsync(string idStr, string source, CancellationToken ct)
-    {
-        var apiKey = await appConfig.GetTmdbApiKeyAsync(ct);
-        if (string.IsNullOrWhiteSpace(apiKey))
-            return $"ID «{idStr}»: TMDB API key is not configured (go to Settings → API Keys).";
 
-        // The key exists but the call failed. Give a hint about wrong source.
-        var otherSource = source == "tmdb_tv" ? "tmdb_movie" : "tmdb_tv";
-        var otherLabel  = source == "tmdb_tv" ? "a Movie" : "a TV Series";
-        return $"ID «{idStr}» was not found as {(source == "tmdb_tv" ? "a TV Series" : "a Movie")} on TMDB. " +
-               $"If this is {otherLabel}, switch the source dropdown to \"{otherSource}\" and try again.";
+    /// <summary>Why a manual apply found nothing: TMDB without its API key
+    /// (every TMDB, IMDb and TVDB lookup goes through it), else not found.</summary>
+    private async Task<(string Code, string Message)> ApplyFailureAsync(string idStr, string source, CancellationToken ct)
+    {
+        if (source != "mal" && string.IsNullOrWhiteSpace(await appConfig.GetTmdbApiKeyAsync(ct)))
+            return ("tmdb_no_key", $"ID «{idStr}»: TMDB API key is not configured (Settings → Metadata).");
+        return ("not_found", source switch
+        {
+            "mal"                     => $"Neither MyAnimeList nor AniList know an anime with ID «{idStr}».",
+            "tmdb_tv" or "tmdb_movie" => $"TMDB has neither a series nor a movie with ID «{idStr}».",
+            "tvdb_tv"                 => $"TMDB knows no title with TVDB ID «{idStr}».",
+            _                         => $"TMDB knows no title with IMDb ID «{idStr}».",
+        });
     }
     // ── LLM winner selection ──────────────────────────────────────────────────
 
