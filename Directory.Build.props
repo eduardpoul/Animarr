@@ -8,6 +8,6 @@
        The commit is appended as "+<sha>" (InformationalVersion): locally by
        the SDK's SourceLink, in Docker via the ANIMARR_COMMIT build argument. -->
   <PropertyGroup>
-    <Version>0.8.0</Version>
+    <Version>0.8.1</Version>
   </PropertyGroup>
 </Project>
