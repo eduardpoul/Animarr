@@ -294,7 +294,7 @@ public partial class MetadataService(
         {
             "tmdb_tv"      => await PopulateTvFromTmdbAsync(item, folder, winner.Id, imgRefresh, log, ct),
             "tmdb_movie"   => await PopulateMovieFromTmdbAsync(item, folder, winner.Id, imgRefresh, log, ct),
-            "mal"          => await PopulateFromMalAsync(item, folder, winner.Id, log, ct),
+            "mal"          => await PopulateFromMalAsync(item, folder, winner.Id, imgRefresh, log, ct),
             "imdb_search"  => await PopulateFromImdbSearchAsync(item, folder, winner.StringId!, winner.IsTv, imgRefresh, log, ct),
             _              => false,
         };
@@ -468,6 +468,12 @@ public partial class MetadataService(
         item.Studio = null; item.Language = null; item.EpisodeCount = null; item.SeasonLabel = null;
         item.CjkTitle = null; item.EnglishTitle = null; item.TagsJson = null;
         item.TmdbConfidence = null; item.MalConfidence = null; item.ImdbConfidence = null;
+        // …and what MAL population only fills when empty (??=): a MAL apply over
+        // a TMDB-identified film kept its year, overview and seasons.
+        item.AniListId = null; item.Year = null; item.Description = null; item.Tagline = null;
+        item.Rating = null; item.RatingCount = null; item.Popularity = null; item.Runtime = null;
+        item.Status = null; item.ContentRating = null;
+        item.GenresJson = null; item.GenresLocalizedJson = null; item.SeasonsJson = null;
         // Hue is intentionally preserved across re-identify — the user may have manually edited it,
         // and the same title should keep its tint even after switching source.
 
@@ -478,7 +484,7 @@ public partial class MetadataService(
             {
                 "tmdb_tv"    => await PopulateTvFromTmdbAsync(item, folder, numId, true, null, ct),
                 "tmdb_movie" => await PopulateMovieFromTmdbAsync(item, folder, numId, true, null, ct),
-                _            => await PopulateFromMalAsync(item, folder, numId, null, ct),
+                _            => await PopulateFromMalAsync(item, folder, numId, true, null, ct),
             };
             // TMDB IDs don't overlap between /tv/ and /movie/, but the folder's
             // guess of which one to try first is often wrong (a "Movies" section

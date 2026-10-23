@@ -183,7 +183,7 @@ public partial class MetadataService
     // ── MAL full populate (winner = MAL) ──────────────────────────────────────
 
     private async Task<bool> PopulateFromMalAsync(
-        MediaItem item, FolderWatcher folder, int malId, Action<string>? log, CancellationToken ct)
+        MediaItem item, FolderWatcher folder, int malId, bool forceRefresh, Action<string>? log, CancellationToken ct)
     {
         var detail = await mal.GetDetailAsync(malId, ct);
         if (detail is null)
@@ -259,7 +259,9 @@ public partial class MetadataService
         {
             var metaDir  = MetaDir(folder);
             var destPath = Path.Combine(metaDir, "poster.jpg");
-            if (!File.Exists(destPath))
+            // A re-identify (forceRefresh) must not keep the previous title's
+            // poster.jpg, as the TMDB paths already don't.
+            if (forceRefresh || !File.Exists(destPath))
             {
                 log?.Invoke($"[Images] Downloading MAL poster → {destPath}");
                 if (await tmdb.DownloadImageAsync(detail.PosterUrl, destPath, ct))
