@@ -107,6 +107,11 @@ public sealed class NativePlayerService : IDisposable
 
     private static bool s_subtitlesRaised;
 
+    /// <summary>The lift while the HUD is up, a fraction of the subtitle
+    /// view's height; 0: hidden under the HUD instead — the upright phone's
+    /// 16:9 box has no room between its centre buttons and bottom bar.</summary>
+    public static float SubtitleLift { get; set; } = 0.22f;
+
     /// <summary>Lift the subtitles above the HUD's bottom bar while it is up;
     /// also re-applies the margin after the view was (re)laid out.</summary>
     public static void SetSubtitlesRaised(bool raised)
@@ -114,7 +119,9 @@ public sealed class NativePlayerService : IDisposable
         s_subtitlesRaised = raised;
         if (s_subtitleView is not { } v || v.Width <= 0 || v.Height <= 0) return;
         int w = v.Width, h = v.Height;
-        v.SetPadding(0, 0, 0, (int)(h * (raised ? 0.22f : 0.07f)));
+        bool hide = raised && SubtitleLift <= 0f;
+        v.Visibility = hide ? global::Android.Views.ViewStates.Invisible : global::Android.Views.ViewStates.Visible;
+        v.SetPadding(0, 0, 0, (int)(h * (raised && !hide ? SubtitleLift : 0.07f)));
         // A raw native child of a MAUI layout: nobody else lays it out again.
         v.Measure(global::Android.Views.View.MeasureSpec.MakeMeasureSpec(w, MeasureSpecMode.Exactly),
                   global::Android.Views.View.MeasureSpec.MakeMeasureSpec(h, MeasureSpecMode.Exactly));
@@ -150,6 +157,11 @@ public sealed class NativePlayerService : IDisposable
     // The player page's SurfaceView: the video on its own compositor layer
     // (no UI redraw per frame, a 4K plane, HDR / DV, frame-rate switching).
     private static SurfaceView? s_surfaceView;
+
+    /// <summary>The part of the surface's parent the picture is fitted in (px,
+    /// the parent's coordinates) — the upright phone player's 16:9 box; null
+    /// or nothing: all of it.</summary>
+    public static Func<(int L, int T, int W, int H)?>? VideoBox { get; set; }
 
     /// <summary>Called by the player page once its SurfaceView is in the view
     /// tree. A SurfaceHolder callback tells the service when the Surface
@@ -187,10 +199,11 @@ public sealed class NativePlayerService : IDisposable
         try
         {
             if (sv.Parent is not global::Android.Views.View parent) return;
-            int W = parent.Width, H = parent.Height;
+            int L = 0, T = 0, W = parent.Width, H = parent.Height;
+            if (VideoBox?.Invoke() is { W: > 0, H: > 0 } box) (L, T, W, H) = box;
             if (W <= 0 || H <= 0) return;
             var (w, h) = SurfaceSize(W, H);
-            int l = (W - w) / 2, t = (H - h) / 2;
+            int l = L + (W - w) / 2, t = T + (H - h) / 2;
             if (sv.Width != w || sv.Height != h || sv.Left != l || sv.Top != t)
                 global::Android.Util.Log.Info("Animarr.NativePlayer",
                     $"aspect {_aspectValue}: video {_vidW}x{_vidH} par={_vidPar:0.###} → surface {w}x{h} at {l},{t} in {W}x{H}");

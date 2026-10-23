@@ -266,6 +266,12 @@
                                 <Border.Behaviors><local:TvFocusBehavior x:Name="GearFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
                                 <Label Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.Settings}" />
                             </Border>
+                            <!-- phone: the picture box (held upright, details below) ⇄ full screen -->
+                            <Border x:Name="FullscreenButton" IsVisible="False" WidthRequest="52" HeightRequest="44" StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8" BackgroundColor="Transparent">
+                                <Border.Behaviors><local:TvFocusBehavior x:Name="FullscreenFocus" Radius="8" FillOnFocus="True" /></Border.Behaviors>
+                                <Label x:Name="FullscreenIcon" Style="{StaticResource HudIcon}" Text="{x:Static local:FluentGlyphs.FullScreen}" />
+                            </Border>
                         </HorizontalStackLayout>
                     </Grid>
                 </VerticalStackLayout>

@@ -15,7 +15,9 @@ namespace Animarr.App;
 /// HDR on the SurfaceView, the same streaming / track / memory logic as the
 /// TV. What differs is the input and the chrome:
 ///
-///   • landscape, system bars hidden; a tap shows / hides the HUD, a double
+///   • held upright, the picture in a 16:9 box over the title's details
+///     (PlayerPage.PhoneLayout.cs); sideways or ⛶, full screen with the
+///     system bars hidden; a tap shows / hides the HUD, a double
 ///     tap on the left / right third seeks -10 / +10 s (each further tap in
 ///     the streak another 10 s), the middle toggles play / pause;
 ///   • ⏮ / big ▶❚❚ / ⏭ in the middle, a draggable seek bar with chapter
@@ -120,6 +122,7 @@ public partial class PlayerPage
 #if ANDROID
         TouchLayer.HandlerChanged += (_, _) => WireTouch();
 #endif
+        SetUpPhoneLayout();
     }
 
     private void SetPlayIcon(bool playing)
@@ -163,16 +166,21 @@ public partial class PlayerPage
 
     private void OnPhoneAppearing()
     {
-        if (!Phone) return;
-        JsInterop.PlatformBridge.SetOrientation("landscape");
+        // No forced landscape any more: upright is the 16:9 box over the
+        // details, sideways (or ⛶) full screen — PlayerPage.PhoneLayout.cs.
     }
 
-    /// <summary>AttachAndStart part: full screen + the system-side controls.</summary>
+    /// <summary>AttachAndStart part: the layout's system bars, turning the
+    /// phone, and the system-side controls.</summary>
     private void OnPhoneAttached()
     {
         if (!Phone) return;
-        SetPhoneImmersive(true);
+        SetPhoneImmersive(_phoneFullscreen);
+        _phoneLang ??= LoadPhoneLanguageAsync();
 #if ANDROID
+        NativePlayerService.VideoBox = PhoneVideoBox;
+        NativePlayerService.Instance?.ApplyAspect();
+        StartOrientationFollow();
         try
         {
             if (_session is { } s)
@@ -188,6 +196,8 @@ public partial class PlayerPage
     {
         if (!Phone) return;
 #if ANDROID
+        NativePlayerService.VideoBox = null;
+        StopOrientationFollow();
         ClearPipParams();
         _notification?.Dispose();
         _notification = null;
@@ -340,7 +350,14 @@ public partial class PlayerPage
                 c.SystemBarsBehavior = AndroidX.Core.View.WindowInsetsControllerCompat.BehaviorShowTransientBarsBySwipe;
                 c.Hide(bars);
             }
-            else c.Show(bars);
+            else
+            {
+                // Light icons: the bars sit over the black page (the app's
+                // theme asks for dark ones — invisible on it).
+                c.AppearanceLightStatusBars = false;
+                c.AppearanceLightNavigationBars = false;
+                c.Show(bars);
+            }
         }
         catch (Exception ex) { Log($"immersive: {ex.Message}"); }
 #endif
@@ -443,6 +460,7 @@ public partial class PlayerPage
         Log($"picture-in-picture {(inPip ? "on" : "off")}");
         if (!inPip)
         {
+            SetPhoneImmersive(_phoneFullscreen);
             // Back full screen while paused: the HUD shows where it stopped.
             if (NativePlayerService.Instance?.GetState() is { PlayWhenReady: false }) RevealHud();
             return;

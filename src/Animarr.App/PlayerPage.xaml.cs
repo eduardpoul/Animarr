@@ -296,7 +296,7 @@ public partial class PlayerPage : ContentPage
     private bool OnBack()
     {
         if (_sheetMode != SheetMode.None) { CloseSheet(); return true; }
-        if (Phone) return false;
+        if (Phone) return PhoneBack();
         if (Hud.IsVisible) { HideHud(); return true; }
         if (UpNextCard.IsVisible) { DismissUpNext(); return true; }
         return false;       // let navigation pop the page
@@ -444,8 +444,11 @@ public partial class PlayerPage : ContentPage
             LayoutNative(sv, w, h);
             NativePlayerService.RegisterSurfaceView(sv);
             AttachSubtitleView(vg, w, h);
-            // After the native layout pass, at the parent's current size.
+            // After the native layout pass, at the parent's current size (and
+            // the phone's 16:9 box, which changes without the page).
             RootGrid.SizeChanged += (_, _) => vg.Post(() => NativePlayerService.Instance?.ApplyAspect());
+            if (_videoBox is not null)
+                _videoBox.SizeChanged += (_, _) => vg.Post(() => NativePlayerService.Instance?.ApplyAspect());
             _attached = true;
         }
 #endif
@@ -467,12 +470,16 @@ public partial class PlayerPage : ContentPage
         NativePlayerService.RegisterSubtitleView(subs);
         NativePlayerService.SetSubtitlesRaised(Hud.IsVisible);
         // The current size, not the one at attach: a phone turns to landscape
-        // after the player opened.
-        RootGrid.SizeChanged += (_, _) => vg.Post(() =>
+        // after the player opened. Upright, over the phone's 16:9 box.
+        void Relayout() => vg.Post(() =>
         {
-            LayoutNative(subs, vg.Width > 0 ? vg.Width : w, vg.Height > 0 ? vg.Height : h);
+            var (l, t, bw, bh) = NativePlayerService.VideoBox?.Invoke()
+                                 ?? (0, 0, vg.Width > 0 ? vg.Width : w, vg.Height > 0 ? vg.Height : h);
+            LayoutNative(subs, l, t, bw, bh);
             NativePlayerService.RelayoutSubtitles();
         });
+        RootGrid.SizeChanged += (_, _) => Relayout();
+        if (_videoBox is not null) _videoBox.SizeChanged += (_, _) => Relayout();
     }
 #endif
 
@@ -481,12 +488,14 @@ public partial class PlayerPage : ContentPage
     private Android.Views.View? _nvSeekFwd, _nvVol, _nvSkip;
     private bool _focusChainWired;
 
-    private static void LayoutNative(Android.Views.View v, int w, int h)
+    private static void LayoutNative(Android.Views.View v, int w, int h) => LayoutNative(v, 0, 0, w, h);
+
+    private static void LayoutNative(Android.Views.View v, int l, int t, int w, int h)
     {
         v.Measure(
             Android.Views.View.MeasureSpec.MakeMeasureSpec(w, Android.Views.MeasureSpecMode.Exactly),
             Android.Views.View.MeasureSpec.MakeMeasureSpec(h, Android.Views.MeasureSpecMode.Exactly));
-        v.Layout(0, 0, w, h);
+        v.Layout(l, t, l + w, t + h);
     }
 #endif
 
@@ -2022,29 +2031,25 @@ public partial class PlayerPage : ContentPage
         if (next is { Episode: int ep } && await EpisodeTitleAsync(next.Season, ep, next.AbsoluteEpisode) is { } title
             && file == _filePath && _nextEpisode == next)
             UpNextName.Text += $" · {title}";
+        // The upright phone layout shows this episode, previous / next and the season.
+        if (Phone && file == _filePath) _ = RefreshPhoneDetailsAsync();
     }
 
-    private Dictionary<(int Season, int Episode), string>? _episodeTitles;
+    private List<EpisodeMetaDto>? _episodeMeta;
 
-    /// <summary>TMDB episode title for a file, mapped like the detail page:
-    /// an absolutely numbered file → TMDB season 1 / its absolute number,
-    /// anything else straight through. Null when unknown.</summary>
-    private async Task<string?> EpisodeTitleAsync(int? season, int episode, int? absolute)
+    /// <summary>The title's TMDB episode texts (cached on the server), fetched
+    /// once; empty when unavailable (retried next time).</summary>
+    private async Task<List<EpisodeMetaDto>> EpisodeMetadataAsync()
     {
-        if (_episodeTitles is null)
-        {
-            try
-            {
-                var meta = await _api.GetEpisodeMetadataAsync(_mediaItemId);
-                _episodeTitles = meta.Where(m => !string.IsNullOrWhiteSpace(m.Title))
-                                     .GroupBy(m => (m.Season, m.Episode))
-                                     .ToDictionary(g => g.Key, g => g.First().Title!);
-            }
-            catch (Exception ex) { Log($"episode titles: {ex.Message}"); return null; }   // retried next time
-        }
-        var key = absolute is int abs ? (1, abs) : (season ?? 1, episode);
-        return _episodeTitles.TryGetValue(key, out var t) ? t : null;
+        if (_episodeMeta is not null) return _episodeMeta;
+        try { return _episodeMeta = (await _api.GetEpisodeMetadataAsync(_mediaItemId)).ToList(); }
+        catch (Exception ex) { Log($"episode metadata: {ex.Message}"); return new List<EpisodeMetaDto>(); }
     }
+
+    /// <summary>TMDB episode title for a file, mapped like the detail page
+    /// (<see cref="MetaFor(List{EpisodeMetaDto}, int?, int, int?)"/>). Null when unknown.</summary>
+    private async Task<string?> EpisodeTitleAsync(int? season, int episode, int? absolute)
+        => MetaFor(await EpisodeMetadataAsync(), season, episode, absolute)?.Title is { Length: > 0 } t ? t : null;
 
     private void ResetUpNext()
     {
