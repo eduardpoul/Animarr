@@ -284,8 +284,11 @@ public sealed class TvRemuxService : BackgroundService
         }
 
         state.Status = StatusRunning;
-        // Next to the source: the switch is a rename on the same volume.
-        var tmp = Path.Combine(dir, "." + Path.GetFileNameWithoutExtension(source) + "." + Guid.NewGuid().ToString("N")[..8] + ".animarr-tmp.mkv");
+        // Next to the source: the switch is a rename on the same volume. No
+        // video extension (-f names the format): the section watcher, discovery
+        // and the title's file walk all go by extension, and a ".mkv" here was
+        // registered as a movie of its own while it was being written.
+        var tmp = Path.Combine(dir, "." + Path.GetFileNameWithoutExtension(source) + "." + Guid.NewGuid().ToString("N")[..8] + ".animarr-tmp");
         var started = Stopwatch.StartNew();
         var psi = new ProcessStartInfo
         {
@@ -323,6 +326,14 @@ public sealed class TvRemuxService : BackgroundService
                     state.Status = StatusFailed;
                     state.Error = err.Length > 500 ? err[^500..] : (err.Length > 0 ? err : $"ffmpeg exit {p.ExitCode}");
                     _logger.LogWarning("TV remux of {Path} failed (exit {Code}): {Err}", source, p.ExitCode, state.Error);
+                    return;
+                }
+                // A read error ends the input like EOF does: ffmpeg closes a
+                // shorter file and exits 0. Say so rather than "duration …".
+                if (err.Contains("Input/output error", StringComparison.Ordinal))
+                {
+                    (state.Status, state.Error) = (StatusFailed, "the file can't be read to the end (a disk read error) — the disk may be failing");
+                    _logger.LogWarning("TV remux of {Path} discarded — read error in the source: {Err}", source, err.Length > 500 ? err[^500..] : err);
                     return;
                 }
             }
