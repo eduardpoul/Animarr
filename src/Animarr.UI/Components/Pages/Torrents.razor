@@ -14,7 +14,7 @@
     record by InfoHash for progress, state and rates.
 
     Add flow lives in the right-side SettingsEditDrawer below: .torrent file /
-    magnet / plain upload → destination + subfolder (DestinationFolderPicker)
+    magnet / plain upload → destination (DestinationFolderPicker)
     → rate caps → post-processing toggles.
 *@
 
@@ -244,53 +244,41 @@
             }
         }
 
-        @* ── 3. DESTINATION (root folder) + subfolder. Subfolder maps to
-              CustomRootFolderName on the add request (subPath for uploads) —
-              the server creates that directory under the chosen root and the
-              download's contents land straight in it.
-              Filter: skip flat-section LEAF entries (SingleFilePath != null).
-              Those rows point at individual video files inside a flat section,
-              not at folders — selecting them as a download target made no
-              sense and the picker rendered them as if they were folders. *@
-        <label class="d-input-group tor-add__field">
-            <span class="d-input-group__label">@L["torrents.save_to_folder_label"]</span>
-            <select class="fs-select fs-select--wide"
-                    value="@(_addFolderId?.ToString() ?? "")"
-                    @onchange="OnAddFolderChanged">
-                <option value="">@L["torrents.default_download_folder_option"]</option>
-                @foreach (var f in FolderOptions())
-                {
-                    <option value="@f.Id">@f.Label — @f.Path</option>
-                }
-            </select>
-        </label>
-
-        @* Subfolder: a button opening DestinationFolderPicker (explorer-style
-           tree of what's already inside the destination + "New folder")
-           instead of a free-text field you had to type a path into blind. *@
+        @* ── 3. DESTINATION — one explorer-style field: DestinationFolderPicker
+              lists the server's root folders, then drills into what's on disk
+              under them (+ "New folder"). It yields the root (→ FolderWatcherId)
+              and a path inside it (→ CustomRootFolderName / upload subPath):
+              a root alone means the download creates its own folder there; a
+              subfolder means its contents land straight in it. Nothing picked
+              = the server's default download directory. *@
         <div class="d-input-group tor-add__field">
-            <span class="d-input-group__label">@L["torrents.create_subfolder_label"]</span>
+            <span class="d-input-group__label">@L["torrents.save_to_folder_label"]</span>
             <div class="tor-add__subfolder">
                 <button type="button"
-                        class="@($"tor-add__subfolder-btn tv-focus {(_addSubfolder is null ? "is-empty" : "")}")"
+                        class="@($"tor-add__subfolder-btn tv-focus {(AddDestRoot is null ? "is-empty" : "")}")"
+                        title="@AddDestPath"
                         @onclick="@(() => _subfolderPickerOpen = true)">
                     <span class="tor-add__subfolder-ic"><DIcon Name="folder" Size="16" /></span>
                     <span class="tor-add__subfolder-text">
-                        @if (_addSubfolder is null)
+                        @if (AddDestRoot is { } root)
                         {
-                            @L["torrents.subfolder_none"]
+                            @string.Join(" / ", SubfolderPath.Split(_addSubfolder).Prepend(root.Label))
+                        }
+                        else if (_addSource == "upload")
+                        {
+                            @L["torrents.subfolder_picker_title"]
                         }
                         else
                         {
-                            @string.Join(" / ", SubfolderPath.Split(_addSubfolder))
+                            @L["torrents.subfolder_default_root"]
                         }
                     </span>
                     <span class="tor-add__subfolder-action">@L["torrents.subfolder_btn_browse"]</span>
                 </button>
-                @if (_addSubfolder is not null)
+                @if (AddDestRoot is not null)
                 {
                     <button type="button" class="fs-icon-btn tor-add__subfolder-clear tv-focus"
-                            @onclick="@(() => _addSubfolder = null)"
+                            @onclick="ClearAddDest"
                             title="@L["torrents.subfolder_clear"]"
                             aria-label="@L["torrents.subfolder_clear"]">
                         <DIcon Name="x" Size="16" />
@@ -331,10 +319,10 @@
 @* Outside the drawer on purpose: the drawer's slide-in transform would make
    it the containing block of the picker's position:fixed. *@
 <DestinationFolderPicker IsOpen="@(_addOpen && _subfolderPickerOpen)"
-                         FolderId="@_addFolderId"
-                         RootLabel="@SubfolderRootLabel"
-                         Value="@_addSubfolder"
-                         OnPick="OnSubfolderPicked"
+                         Roots="@DestinationRoots()"
+                         HideFolder="IsMovieFolderPath"
+                         Value="@(_addFolderId is Guid id ? new DestinationFolderPicker.Pick(id, _addSubfolder) : null)"
+                         OnPick="OnDestinationPicked"
                          OnClose="@(() => _subfolderPickerOpen = false)" />
 
 @* ── Stat tiles — summed from the live SignalR snapshots of the listed
@@ -551,11 +539,14 @@ else
     private TorrentRecordDto[]? _records;
     private FolderWatcherDto[]? _folders;
     /// <summary>FolderWatcher ids whose media item is a MOVIE. Used to keep the
-    /// "Save to folder" picker free of movie destinations (you add a torrent to
+    /// destination picker free of movie destinations (you add a torrent to
     /// a series folder or a source root, never "into" a single movie). Single
     /// movie FILES are already excluded via SingleFilePath; this also catches
     /// the rarer movie-stored-as-a-folder case, which SingleFilePath misses.</summary>
     private HashSet<Guid> _movieFolderIds = new();
+    /// <summary>Same movie folders by <see cref="PathKey"/> — the picker walks
+    /// the disk, so it can only match them by path.</summary>
+    private HashSet<string> _movieFolderPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TorrentLiveStatsDto> _live = new();
     private HubConnection? _hub;
 
@@ -630,27 +621,28 @@ else
         _subfolderPickerOpen = false;
     }
 
-    /// <summary>The subfolder is relative to the destination, so switching
-    /// destination drops it — "Season 2" under one show means nothing under
-    /// another.</summary>
-    private void OnAddFolderChanged(ChangeEventArgs e)
+    private void OnDestinationPicked(DestinationFolderPicker.Pick pick)
     {
-        var id = Guid.TryParse(e.Value?.ToString(), out var g) ? g : (Guid?)null;
-        if (id != _addFolderId) _addSubfolder = null;
-        _addFolderId = id;
-    }
-
-    private void OnSubfolderPicked(string? path)
-    {
-        _addSubfolder = SubfolderPath.Normalize(path);
+        _addFolderId  = pick.RootId;
+        _addSubfolder = SubfolderPath.Normalize(pick.SubPath);
         _subfolderPickerOpen = false;
     }
 
-    /// <summary>Root row label in the picker — the destination's name.</summary>
-    private string SubfolderRootLabel
-        => _addFolderId is Guid id && _folders?.FirstOrDefault(f => f.Id == id) is { } f
-            ? f.Label
-            : L["torrents.subfolder_default_root"];
+    /// <summary>Back to "nothing picked" — the default download directory.</summary>
+    private void ClearAddDest()
+    {
+        _addFolderId  = null;
+        _addSubfolder = null;
+    }
+
+    private FolderWatcherDto? AddDestRoot
+        => _addFolderId is Guid id ? _folders?.FirstOrDefault(f => f.Id == id) : null;
+
+    /// <summary>Absolute destination, for the field's tooltip.</summary>
+    private string? AddDestPath
+        => AddDestRoot is { } root
+            ? SubfolderPath.Split(_addSubfolder).Aggregate(root.Path.TrimEnd('/', '\\'), (dir, seg) => $"{dir}/{seg}")
+            : null;
 
     private async Task OnTorrentDeleted()
     {
@@ -738,7 +730,7 @@ else
             _records = await Api.GetTorrentsAsync();
             _folders = await Api.GetFoldersAsync();
 
-            // Movie folder ids — so FolderOptions() can drop movie destinations.
+            // Movie folders — so the destination picker can hide them.
             // FolderType is unreliable here (some series folders are tagged
             // Movie), so we use the identified MediaItemType as ground truth.
             try
@@ -748,27 +740,33 @@ else
                 _movieFolderIds = movies.Select(m => m.FolderId).ToHashSet();
             }
             catch { _movieFolderIds = new HashSet<Guid>(); }
+            _movieFolderPaths = _folders
+                .Where(f => f.SingleFilePath is null && _movieFolderIds.Contains(f.Id))
+                .Select(f => PathKey(f.Path))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
         catch { /* offline */ }
         StateHasChanged();
     }
 
-    /// <summary>Folders offered as download targets in the Add-Torrent drawer.
-    /// Per the user's spec: SOURCE folders (section roots) + every SERIES folder,
-    /// but NO movies. Rationale:
-    ///   • Section roots (IsSection) are the "source folders" — drop a download
-    ///     here and the optional "Create subfolder" field carves out a leaf.
-    ///   • Series folders (a real directory, SingleFilePath == null) are valid
-    ///     targets — e.g. adding a new season to an existing show.
-    ///   • Movies are excluded two ways: single video FILES (SingleFilePath set)
-    ///     and movie-stored-as-folder rows (_movieFolderIds, by MediaItemType).
-    /// Ordered source-roots-first, then series folders alphabetically.</summary>
-    private IEnumerable<FolderWatcherDto> FolderOptions()
+    /// <summary>Top level of the destination picker: the root folders the user
+    /// added on the server (no ParentSectionId — sections and standalone
+    /// folders), minus single-file entries and movies. Series folders inside a
+    /// section aren't listed here; the picker reaches them by drilling in.</summary>
+    private List<FolderWatcherDto> DestinationRoots()
         => (_folders ?? Array.Empty<FolderWatcherDto>())
-            .Where(f => f.IsSection
-                     || (f.SingleFilePath is null && !_movieFolderIds.Contains(f.Id)))
-            .OrderByDescending(f => f.IsSection)
-            .ThenBy(f => f.Label, StringComparer.OrdinalIgnoreCase);
+            .Where(f => f.ParentSectionId is null
+                     && f.SingleFilePath is null
+                     && !_movieFolderIds.Contains(f.Id))
+            .OrderBy(f => f.Label, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    /// <summary>Hides movie folders in the picker — you add a torrent to a
+    /// section or a series, never "into" a movie. Same rule the old dropdown
+    /// applied, matched by path since the picker walks the disk.</summary>
+    private bool IsMovieFolderPath(string absPath) => _movieFolderPaths.Contains(PathKey(absPath));
+
+    private static string PathKey(string path) => path.Replace('\\', '/').TrimEnd('/');
 
     private async Task OnTorrentFilePicked(InputFileChangeEventArgs e)
     {

@@ -1,21 +1,24 @@
 @*
     DestinationFolderPicker — centred popup (bottom sheet on phone) that picks
-    WHERE inside the chosen download destination a download lands. Replaces the
-    Add drawer's free-text "Create subfolder" field.
+    WHERE a download lands. The Add drawer's only destination control: it
+    replaced both the "Save to folder" dropdown and the free-text subfolder.
 
-    Explorer-style lazy tree: the root row is the destination itself (= no
-    subfolder); clicking a folder selects it and loads its children from
-    GET /api/torrents/destination/browse, one level at a time. "New folder"
-    adds a child under the selected node.
+    Explorer-style lazy tree. The top level is the server's root folders (what
+    the user added under Settings → Root folders); clicking a folder selects it
+    and loads its children from GET /api/torrents/destination/browse, one level
+    at a time. "New folder" adds a child under the selected node.
+
+    The result is (root folder id, path relative to it). Picking a root itself
+    gives a null path — the download then creates its own folder inside; a
+    deeper pick becomes CustomRootFolderName and the contents land straight in.
 
     New folders are VIRTUAL until the download starts — the server creates the
     directory when it writes the first file. Creating it here would leave an
     empty folder behind on Cancel, and an empty folder inside a library section
     gets picked up by the folder watcher and queued for identification.
 
-    The value is the '/'-joined path relative to the destination root
-    ("Cowboy Bebop/Season 2"), or null for the root. Re-opening rebuilds the
-    tree along that path; segments not on disk come back as pending new folders.
+    Re-opening rebuilds the tree along the current value; segments not on disk
+    come back as pending new folders.
 
     Rendered by the caller OUTSIDE SettingsEditDrawer: the drawer animates a
     transform, which would make it the containing block of position:fixed.
@@ -49,7 +52,8 @@
                        value="@_filter"
                        @oninput="@(e => _filter = e.Value?.ToString() ?? "")" />
             </label>
-            <Btn Variant="ghost" Size="md" OnClick="BeginCreateAsync" Disabled="@(_createParent is not null)">
+            <Btn Variant="ghost" Size="md" OnClick="BeginCreateAsync"
+                 Disabled="@(_selected is null || _createParent is not null)">
                 <DIcon Name="plus" Size="13" /> @L["torrents.subfolder_btn_new"]
             </Btn>
         </div>
@@ -60,7 +64,7 @@
                 if (row.Kind == RowKind.Folder)
                 {
                     var node = row.Node;
-                    var isRoot = node.Parent is null;
+                    var isRoot = node.Parent == _top;
                     var selected = node == _selected;
                     @* @key on the node so Blazor doesn't rebind a row's handlers to a
                        neighbour when a level loads or the filter changes. *@
@@ -70,7 +74,7 @@
                          role="treeitem"
                          aria-selected="@(selected ? "true" : "false")"
                          aria-expanded="@(node.Expanded ? "true" : "false")">
-                        @if (!isRoot && HasCaret(node))
+                        @if (HasCaret(node))
                         {
                             <button type="button"
                                     class="@($"dfp__caret {(node.Expanded ? "is-open" : "")}")"
@@ -80,7 +84,7 @@
                                 <DIcon Name="chev-r" Size="12" />
                             </button>
                         }
-                        else if (!isRoot)
+                        else
                         {
                             <span class="dfp__caret dfp__caret--leaf"></span>
                         }
@@ -89,10 +93,10 @@
                                 @onclick="@(() => SelectAsync(node))"
                                 @ondblclick="@(() => PickAsync(node))">
                             <span class="dfp__ficon"><DIcon Name="folder" Size="16" /></span>
-                            <span class="dfp__name" title="@(isRoot ? RootLabel : node.Name)">@(isRoot ? RootLabel : node.Name)</span>
-                            @if (isRoot && _rootPath.Length > 0)
+                            <span class="dfp__name" title="@node.Name">@node.Name</span>
+                            @if (isRoot)
                             {
-                                <span class="dfp__root-path" title="@_rootPath"><bdi dir="ltr">@_rootPath</bdi></span>
+                                <span class="dfp__root-path" title="@node.AbsPath"><bdi dir="ltr">@node.AbsPath</bdi></span>
                             }
                             @if (node.IsNew)
                             {
@@ -149,6 +153,7 @@
                         {
                             RowKind.Error     => L["torrents.subfolder_load_error"],
                             RowKind.NoMatches => L["torrents.subfolder_no_matches"],
+                            RowKind.NoRoots   => L["torrents.subfolder_no_roots"],
                             _                 => L["torrents.subfolder_empty"],
                         })
                     </div>
@@ -159,10 +164,17 @@
         <footer class="dfp__foot">
             <div class="dfp__target">
                 <span class="dfp__target-label">@L["torrents.subfolder_target_label"]</span>
-                <span class="dfp__target-path" title="@TargetPath"><bdi dir="ltr">@TargetPath</bdi></span>
+                @if (_selected is null)
+                {
+                    <span class="dfp__target-path dfp__target-path--empty">@L["torrents.subfolder_pick_prompt"]</span>
+                }
+                else
+                {
+                    <span class="dfp__target-path" title="@TargetPath"><bdi dir="ltr">@TargetPath</bdi></span>
+                }
             </div>
             <div class="dfp__actions">
-                <Btn Variant="primary" Size="md" OnClick="ConfirmAsync">
+                <Btn Variant="primary" Size="md" OnClick="ConfirmAsync" Disabled="@(_selected is null)">
                     <DIcon Name="check" Size="13" /> @L["torrents.subfolder_btn_select"]
                 </Btn>
                 <Btn Variant="ghost" Size="md" OnClick="CancelAsync">@L["common.btn_cancel"]</Btn>
@@ -172,22 +184,28 @@
 }
 
 @code {
+    /// <summary>A picked destination: the root folder (a FolderWatcher id) and
+    /// the '/'-joined path inside it, null = the root itself.</summary>
+    public sealed record Pick(Guid RootId, string? SubPath);
+
     [Parameter] public bool IsOpen { get; set; }
-    /// <summary>FolderWatcher the path is relative to; null = the server's
-    /// default download directory.</summary>
-    [Parameter] public Guid? FolderId { get; set; }
-    /// <summary>Display name for the root row (the destination's label).</summary>
-    [Parameter] public string RootLabel { get; set; } = "";
-    /// <summary>Current relative path ("Show/Season 2"), null = root.</summary>
-    [Parameter] public string? Value { get; set; }
-    /// <summary>Raised with the picked path (null = root) when the user confirms.</summary>
-    [Parameter] public EventCallback<string?> OnPick { get; set; }
+    /// <summary>Top-level rows — the server's root folders.</summary>
+    [Parameter] public IReadOnlyList<FolderWatcherDto> Roots { get; set; } = Array.Empty<FolderWatcherDto>();
+    /// <summary>Optional filter over subfolders by absolute server path — the
+    /// Add drawer hides movie folders (a download never goes INTO a movie).</summary>
+    [Parameter] public Func<string, bool>? HideFolder { get; set; }
+    /// <summary>Current destination, null = nothing chosen yet.</summary>
+    [Parameter] public Pick? Value { get; set; }
+    /// <summary>Raised with the chosen destination when the user confirms.</summary>
+    [Parameter] public EventCallback<Pick> OnPick { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
     private sealed class Node
     {
         public string Name = "";
         public Node?  Parent;
+        public FolderWatcherDto? Root;   // set on top-level rows only
+        public string AbsPath = "";      // server path; "" until the level above is listed
         public bool   IsNew;      // virtual — created on disk when the download starts
         public bool   Expanded;
         public bool   Loaded;
@@ -195,17 +213,20 @@
         public bool   Failed;
         public List<Node> Children = new();
 
-        public string RelPath => Parent is null ? ""
-            : Parent.Parent is null ? Name
+        /// <summary>Path relative to the root folder this node lives under.</summary>
+        public string RelPath => Parent is null || Root is not null ? ""
+            : Parent.Root is not null ? Name
             : $"{Parent.RelPath}/{Name}";
+
+        public Node RootNode => Root is not null || Parent is null ? this : Parent.RootNode;
     }
 
-    private enum RowKind { Folder, NewInput, Empty, NoMatches, Error }
+    private enum RowKind { Folder, NewInput, Empty, NoMatches, NoRoots, Error }
     private readonly record struct Row(RowKind Kind, Node Node, int Depth);
 
-    private Node   _root = new();
+    // Invisible tree top — its children are the root folders.
+    private Node   _top = new();
     private Node?  _selected;
-    private string _rootPath = "";
     private string _filter = "";
     private bool   _wasOpen;
 
@@ -239,18 +260,27 @@
 
     private async Task ResetAsync()
     {
-        _root         = new Node { Expanded = true };
-        _selected     = _root;
-        _rootPath     = "";
+        _top          = new Node { Expanded = true, Loaded = true };
+        _top.Children = Roots
+            .Select(r => new Node { Name = r.Label, Root = r, AbsPath = r.Path, Parent = _top })
+            .ToList();
+        _selected     = null;
         _filter       = "";
         _createParent = null;
         _newName      = "";
         _newError     = null;
-        await LoadAsync(_root);
 
         // Re-open on the current value: walk its segments level by level.
-        var cur = _root;
-        foreach (var seg in SubfolderPath.Split(Value))
+        var cur = Value is { } v ? _top.Children.FirstOrDefault(n => n.Root!.Id == v.RootId) : null;
+        if (cur is null)
+        {
+            // Nothing chosen: a lone root opens straight away — nothing to pick between.
+            if (_top.Children.Count == 1) await ToggleAsync(_top.Children[0]);
+            return;
+        }
+
+        if (!cur.Loaded) await LoadAsync(cur);
+        foreach (var seg in SubfolderPath.Split(Value!.SubPath))
         {
             var next = FindChild(cur, seg);
             if (next is null)
@@ -262,6 +292,7 @@
             if (!next.Loaded) await LoadAsync(next);
             cur = next;
         }
+        cur.Expanded = true;
         _selected = cur;
     }
 
@@ -273,14 +304,15 @@
         StateHasChanged();
         try
         {
-            var res = await Api.BrowseDestinationAsync(FolderId, node.RelPath);
-            if (node.Parent is null) _rootPath = res.Path;
+            var res = await Api.BrowseDestinationAsync(node.RootNode.Root!.Id, node.RelPath);
+            node.AbsPath = res.Path;
             // Keep pending new folders the user already added at this level.
             var pending = node.Children.Where(c => c.IsNew).ToList();
             node.Children = pending
                 .Concat(res.Folders
                     .Where(f => !pending.Any(p => SameName(p.Name, f)))
-                    .Select(f => new Node { Name = f, Parent = node }))
+                    .Select(f => new Node { Name = f, Parent = node, AbsPath = JoinPath(res.Path, f) })
+                    .Where(n => HideFolder is null || !HideFolder(n.AbsPath)))
                 .ToList();
             node.Loaded = true;
         }
@@ -326,10 +358,11 @@
 
     // ── Rows ──────────────────────────────────────────────────────────
 
-    /// <summary>Depth-first visible rows. The filter only constrains a branch
-    /// until a folder whose name matches — below a match everything shows, so
-    /// filtering "bebop" then opening "Cowboy Bebop" still lists its seasons.
-    /// Under a filter, collapsed-but-loaded branches surface their matches too.</summary>
+    /// <summary>Depth-first visible rows. Root folders always show; below them
+    /// the filter only constrains a branch until a folder whose name matches —
+    /// below a match everything shows, so filtering "bebop" then opening
+    /// "Cowboy Bebop" still lists its seasons. Under a filter, collapsed-but-
+    /// loaded branches surface their matches too.</summary>
     private List<Row> Rows()
     {
         var rows   = new List<Row>();
@@ -357,11 +390,12 @@
                 Walk(c, depth + 1, matched || NameMatches(c, filter));
                 shown++;
             }
-            if (open && shown == 0 && n.Loaded && n != _createParent && (!active || n == _root))
+            if (open && shown == 0 && n.Loaded && n != _createParent && (!active || n.Root is not null))
                 rows.Add(new Row(active ? RowKind.NoMatches : RowKind.Empty, n, depth + 1));
         }
 
-        Walk(_root, 0, false);
+        if (_top.Children.Count == 0) rows.Add(new Row(RowKind.NoRoots, _top, 0));
+        foreach (var root in _top.Children) Walk(root, 0, NameMatches(root, filter));
         return rows;
     }
 
@@ -387,7 +421,7 @@
 
     private async Task BeginCreateAsync()
     {
-        var parent = _selected ?? _root;
+        if (_selected is not { } parent) return;
         if (!parent.Expanded) await ToggleAsync(parent);
         _createParent  = parent;
         _newName       = "";
@@ -452,19 +486,25 @@
     {
         get
         {
-            var rel = _selected?.RelPath ?? "";
-            if (_rootPath.Length == 0) return rel;
-            if (rel.Length == 0) return _rootPath;
-            // Match the server's separator so a Windows dev box previews "C:\…".
-            var sep = _rootPath.Contains('\\') && !_rootPath.Contains('/') ? '\\' : '/';
-            return _rootPath.TrimEnd('/', '\\') + sep + rel.Replace('/', sep);
+            if (_selected is null) return "";
+            var root = _selected.RootNode.AbsPath;
+            var rel  = _selected.RelPath;
+            return rel.Length == 0 ? root : JoinPath(root, rel);
         }
+    }
+
+    /// <summary>Join with the server's separator so a Windows dev box previews "C:\…".</summary>
+    private static string JoinPath(string dir, string rel)
+    {
+        var sep = dir.Contains('\\') && !dir.Contains('/') ? '\\' : '/';
+        return dir.TrimEnd('/', '\\') + sep + rel.Replace('/', sep);
     }
 
     private async Task ConfirmAsync()
     {
-        var rel = _selected?.RelPath ?? "";
-        await OnPick.InvokeAsync(rel.Length == 0 ? null : rel);
+        if (_selected is null) return;
+        var rel = _selected.RelPath;
+        await OnPick.InvokeAsync(new Pick(_selected.RootNode.Root!.Id, rel.Length == 0 ? null : rel));
     }
 
     private Task CancelAsync() => OnClose.InvokeAsync();

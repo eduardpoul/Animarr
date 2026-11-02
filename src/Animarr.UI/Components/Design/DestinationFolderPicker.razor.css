@@ -199,8 +199,8 @@
     text-align: left;
     border-radius: var(--radius-ctrl);
 }
-.dfp__row--root .dfp__pick { padding-left: 8px; font-weight: 600; }
-/* The destination's name wins over its (often long) path, which clips first. */
+.dfp__row--root .dfp__pick { font-weight: 600; }
+/* The root folder's name wins over its (often long) path, which clips first. */
 .dfp__row--root .dfp__name { flex-shrink: 0; max-width: 60%; }
 
 .dfp__ficon {
@@ -320,6 +320,11 @@
     white-space: nowrap;
     direction: rtl;
     text-align: left;
+}
+.dfp__target-path--empty {
+    font-family: var(--font-ui);
+    color: var(--text-faint);
+    direction: ltr;
 }
 .dfp__actions {
     display: flex;
